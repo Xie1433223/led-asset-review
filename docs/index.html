@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>LED Asset Review</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; background: #fafafa; color: #202124; }
+    .header { background: white; padding: 12px 24px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; font-size: 18px; }
+    .badge { font-size: 12px; padding: 4px 10px; border-radius: 12px; }
+    .badge-rename { background: #e6f4ea; color: #0d8043; }
+    .badge-copy { background: #fef7e0; color: #b06000; }
+    .main { max-width: 720px; margin: 40px auto; padding: 0 20px; }
+    .drop-zone { background: white; border: 2px dashed #9aa0a6; border-radius: 8px; padding: 60px 20px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .drop-zone:hover, .drop-zone.dragover { background: #f0f7ff; border-color: #1a73e8; }
+    .drop-zone h2 { margin: 0 0 8px; color: #5f6368; }
+    .drop-zone p { margin: 0; color: #80868b; font-size: 14px; }
+    .boot-error { background: #fce8e6; border: 1px solid #d93025; color: #d93025; padding: 20px; border-radius: 4px; text-align: center; }
+    .boot-error button { margin-top: 12px; padding: 6px 16px; background: #d93025; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .toast { position: fixed; bottom: 20px; right: 20px; background: #202124; color: white; padding: 12px 20px; border-radius: 4px; opacity: 0; transition: opacity 0.3s; max-width: 360px; }
+    .toast.show { opacity: 0.95; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎬 LED Asset Review</h1>
+    <span id="cap-badge" class="badge">检测中…</span>
+  </div>
+  <div class="main" id="main">
+    <!-- boot / drop zone / cards rendered here -->
+  </div>
+  <div id="toast" class="toast"></div>
+
+  <script src="./app.js"></script>
+  <script>
+    const App = {
+      state: { phase: 'boot', capability: null, rules: null, violations: [], currentIndex: 0, skippedTypes: new Set(), history: [] },
+
+      async boot() {
+        // Capability detection
+        const cap = CapabilityDetector.detect();
+        this.state.capability = cap.rename ? 'rename' : 'copy-only';
+        const badge = document.getElementById('cap-badge');
+        badge.textContent = cap.rename ? '✅ 实测改名' : '📋 复制改名';
+        badge.className = 'badge ' + (cap.rename ? 'badge-rename' : 'badge-copy');
+
+        // Fetch SKILL.md
+        try {
+          const res = await fetch('./SKILL.md');
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const md = await res.text();
+          this.state.rules = RuleParser.parse(md);
+          this.showDropZone();
+        } catch (e) {
+          this.showBootError('加载规则失败：' + e.message);
+        }
+      },
+
+      showBootError(msg) {
+        document.getElementById('main').innerHTML = `
+          <div class="boot-error">
+            <h2>❌ 启动失败</h2>
+            <p>${msg}</p>
+            <p>请确认 <code>docs/SKILL.md</code> 存在后 <a href="javascript:location.reload()">刷新页面</a></p>
+          </div>`;
+      },
+
+      showDropZone() {
+        const cap = this.state.capability;
+        const hint = cap === 'rename'
+          ? '拖入文件夹后，违规文件可在浏览器内直接改名'
+          : '拖入文件夹后，违规文件名复制到剪贴板，Finder/Explorer 改名';
+        document.getElementById('main').innerHTML = `
+          <div class="drop-zone" id="drop">
+            <h2>📁 拖入文件夹开始审核</h2>
+            <p>${hint}</p>
+            <p style="margin-top:16px;"><button id="pick-btn">或点击选择文件夹</button></p>
+          </div>`;
+
+        const drop = document.getElementById('drop');
+        drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+        drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+        drop.addEventListener('drop', e => {
+          e.preventDefault();
+          drop.classList.remove('dragover');
+          this.handleDrop(e.dataTransfer.items);
+        });
+        document.getElementById('pick-btn').addEventListener('click', () => this.handlePicker());
+      },
+
+      async handleDrop(items) {
+        for (const item of items) {
+          if (item.kind !== 'file') continue;
+          const handle = await item.getAsFileSystemHandle();
+          if (handle?.kind === 'directory') {
+            await this.scanAndReview(handle);
+            return;
+          }
+        }
+        this.toast('请拖入文件夹，不要拖入单个文件');
+      },
+
+      async handlePicker() {
+        if (!window.showDirectoryPicker) {
+          this.toast('当前浏览器不支持选目录，请用拖入');
+          return;
+        }
+        try {
+          const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          await this.scanAndReview(handle);
+        } catch (e) {
+          if (e.name !== 'AbortError') this.toast('选目录失败：' + e.message);
+        }
+      },
+
+      async scanAndReview(dirHandle) {
+        this.state.phase = 'scanning';
+        const entries = [];
+        await ScanEngine.walkFileTree(dirHandle, entry => {
+          if (entry.kind === 'file') entries.push({ name: entry.name, handle: entry.handle, parent: dirHandle.name });
+        });
+        this.runValidation(entries);
+      },
+
+      runValidation(entries) {
+        const violations = [];
+        for (const entry of entries) {
+          const { issues, suggestedName } = ScanEngine.validate(entry.name, entry.parent, this.state.rules, { projectMode: true, checkSeqExt: true });
+          if (issues.length > 0) {
+            violations.push({ file: entry, parent: entry.parent, issues, suggestedName, status: 'pending' });
+          }
+        }
+        this.state.violations = violations;
+        this.state.phase = 'reviewing';
+        if (violations.length === 0) {
+          this.renderAllClean();
+        } else {
+          this.renderCurrentCard();
+        }
+      },
+
+      renderAllClean() {
+        document.getElementById('main').innerHTML = `
+          <div style="text-align:center;padding:60px 20px;">
+            <h1 style="font-size:48px;color:#0d8043;">✅</h1>
+            <h2>全部合规</h2>
+            <p>扫描完成，未发现违规命名。</p>
+            <button onclick="location.reload()">再来一次</button>
+          </div>`;
+      },
+
+      renderCurrentCard() {
+        // Placeholder — implemented in Task 11
+        document.getElementById('main').innerHTML = `<p>Card Stack 待实现 (Task 11)，当前 ${this.state.violations.length} 个违规</p>`;
+      },
+
+      toast(msg, ms = 3000) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), ms);
+      }
+    };
+
+    App.boot();
+  </script>
+</body>
+</html>
