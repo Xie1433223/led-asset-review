@@ -123,7 +123,25 @@
         this.state.phase = 'scanning';
         const entries = [];
         await ScanEngine.walkFileTree(dirHandle, entry => {
-          if (entry.kind === 'file') entries.push({ name: entry.name, handle: entry.handle, parent: dirHandle.name });
+          if (entry.kind === 'file') {
+            // pathSegments: ['sub1', 'sub2'] — directory chain from root
+            // (excluded) to file's parent (excluded). [] = root. Store as
+            // strings, NOT handles — handles from entries() are bound to
+            // a one-shot iteration snapshot and go stale within seconds
+            // ("state cached in interface object changed"). Re-walking
+            // from _dirHandle via resolveParentHandle() gives a live
+            // handle every time.
+            const pathSegments = entry.path.includes('/')
+              ? entry.path.slice(0, entry.path.lastIndexOf('/')).split('/')
+              : [];
+            entries.push({
+              name: entry.name,
+              path: entry.path,
+              handle: entry.handle,
+              parent: dirHandle.name,
+              pathSegments
+            });
+          }
         });
         this.runValidation(entries);
       },
@@ -247,8 +265,7 @@
       },
 
       async doRename(v) {
-        const dirHandle = this._dirHandle;
-        if (!dirHandle) { this.toast('内部错误：未记录目录句柄'); return; }
+        if (!this._dirHandle) { this.toast('内部错误：未记录目录句柄'); return; }
         if (!v.suggestedName) { this.toast('无法改名：无建议名'); return; }
 
         // No-op: suggested name matches original — avoid an unnecessary rename
@@ -262,18 +279,39 @@
           return;
         }
 
+        // Re-resolve a fresh parent handle NOW. Never trust anything from
+        // scan time — see resolveParentHandle() for why.
+        let parentHandle;
         try {
-          // Prefer move() if available (Chrome 110+)
-          if (typeof v.file.handle.move === 'function') {
-            await v.file.handle.move(v.suggestedName);
+          parentHandle = await this.resolveParentHandle(v.file.pathSegments);
+        } catch (e) {
+          console.error('resolveParent failed:', e, { file: v.file.name, pathSegments: v.file.pathSegments, stack: e.stack });
+          this.toast('无法定位父目录：' + e.message);
+          return;
+        }
+
+        // Re-resolve a fresh file handle from the live parent.
+        let liveFileHandle;
+        try {
+          liveFileHandle = await parentHandle.getFileHandle(v.file.name, { create: false });
+        } catch (e) {
+          console.error('re-resolve file failed:', e, { file: v.file.name, parent: v.file.parent });
+          this.toast('文件已不存在或不可访问：' + v.file.name);
+          return;
+        }
+
+        try {
+          // Prefer move() if available (Chrome 110+) — handles cross-dir moves
+          if (typeof liveFileHandle.move === 'function') {
+            await liveFileHandle.move(v.suggestedName);
           } else {
             // Fallback: copy + delete (older Chrome, Edge)
-            const oldFile = await v.file.handle.getFile();
-            const newHandle = await dirHandle.getFileHandle(v.suggestedName, { create: true });
+            const oldFile = await liveFileHandle.getFile();
+            const newHandle = await parentHandle.getFileHandle(v.suggestedName, { create: true });
             const writable = await newHandle.createWritable();
             await writable.write(oldFile);
             await writable.close();
-            await dirHandle.removeEntry(v.file.name);
+            await parentHandle.removeEntry(v.file.name);
           }
           v.status = 'renamed';
           this.state.history.push({ type: 'rename', index: this.state.currentIndex });
@@ -281,6 +319,7 @@
           this.advancePastSkipped();
           this.renderCurrentCard();
         } catch (e) {
+          console.error('rename failed:', e, { file: v.file.name, to: v.suggestedName, pathSegments: v.file.pathSegments, stack: e.stack });
           this.toast('改名失败：' + e.message);
         }
       },
@@ -326,9 +365,11 @@
         if (pending.length === 0) { this.toast('无待处理违规'); return; }
         const lines = ['#!/usr/bin/env bash', 'set -e', ''];
         for (const v of pending) {
-          // Escape single quotes for shell
-          const oldQ = `'${v.file.name.replace(/'/g, "'\\''")}'`;
-          const newQ = `'${v.suggestedName.replace(/'/g, "'\\''")}'`;
+          // Use full path (subdir/file.ext) so mv works in any subdirectory.
+          // Replace just the basename for the new name, keep the dir prefix.
+          const dir = v.file.path.includes('/') ? v.file.path.slice(0, v.file.path.lastIndexOf('/') + 1) : '';
+          const oldQ = `'${v.file.path.replace(/'/g, "'\\''")}'`;
+          const newQ = `'${(dir + v.suggestedName).replace(/'/g, "'\\''")}'`;
           lines.push(`mv -- ${oldQ} ${newQ}`);
         }
         const content = lines.join('\n') + '\n';
@@ -360,6 +401,21 @@
         t.textContent = msg;
         t.classList.add('show');
         setTimeout(() => t.classList.remove('show'), ms);
+      },
+
+      // Walk pathSegments from the live root handle (_dirHandle) to get
+      // a fresh parent dir handle. This is the only way to defeat FSA's
+      // "state cached in interface object changed" error: handles from
+      // entries() at scan time are bound to a one-shot iteration
+      // snapshot and go stale within seconds. The root handle from
+      // showDirectoryPicker / getAsFileSystemHandle stays live for the
+      // session, so we walk down through it fresh on every operation.
+      async resolveParentHandle(pathSegments) {
+        let cur = this._dirHandle;
+        for (const seg of pathSegments) {
+          cur = await cur.getDirectoryHandle(seg, { create: false });
+        }
+        return cur;
       }
     };
 
