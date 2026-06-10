@@ -72,6 +72,10 @@
           ? '拖入文件夹后，违规文件可在浏览器内直接改名'
           : '拖入文件夹后，违规文件名复制到剪贴板，Finder/Explorer 改名';
         document.getElementById('main').innerHTML = `
+          <div class="toggles" style="margin-bottom:16px;background:white;padding:12px 16px;border-radius:4px;border:1px solid #e0e0e0;">
+            <label style="margin-right:20px;"><input type="checkbox" id="tog-project" checked> 启用项目级约定（iQiyi 内部项目）</label>
+            <label><input type="checkbox" id="tog-seqext" checked> 校验序列帧扩展名</label>
+          </div>
           <div class="drop-zone" id="drop">
             <h2>📁 拖入文件夹开始审核</h2>
             <p>${hint}</p>
@@ -125,9 +129,11 @@
       },
 
       runValidation(entries) {
+        const projectMode = document.getElementById('tog-project')?.checked ?? true;
+        const checkSeqExt = document.getElementById('tog-seqext')?.checked ?? true;
         const violations = [];
         for (const entry of entries) {
-          const { issues, suggestedName } = ScanEngine.validate(entry.name, entry.parent, this.state.rules, { projectMode: true, checkSeqExt: true });
+          const { issues, suggestedName } = ScanEngine.validate(entry.name, entry.parent, this.state.rules, { projectMode, checkSeqExt });
           if (issues.length > 0) {
             violations.push({ file: entry, parent: entry.parent, issues, suggestedName, status: 'pending' });
           }
@@ -312,13 +318,37 @@
       },
 
       generateShell() {
-        // Placeholder — Task 13
-        this.toast('rename.sh 生成待实现 (Task 13)');
+        const pending = this.state.violations.filter(v => v.status === 'pending' && v.suggestedName);
+        if (pending.length === 0) { this.toast('无待处理违规'); return; }
+        const lines = ['#!/usr/bin/env bash', 'set -e', ''];
+        for (const v of pending) {
+          // Escape single quotes for shell
+          const oldQ = `'${v.file.name.replace(/'/g, "'\\''")}'`;
+          const newQ = `'${v.suggestedName.replace(/'/g, "'\\''")}'`;
+          lines.push(`mv -- ${oldQ} ${newQ}`);
+        }
+        const content = lines.join('\n') + '\n';
+        const blob = new Blob([content], { type: 'text/x-shellscript' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'rename.sh';
+        a.click();
+        URL.revokeObjectURL(url);
+        this.toast(`已下载 rename.sh（${pending.length} 个改名）`);
       },
 
       renderDone() {
-        // Placeholder — Task 13
-        document.getElementById('main').innerHTML = `<h2>完成！</h2>`;
+        const renamed = this.state.violations.filter(v => v.status === 'renamed').length;
+        const skipped = this.state.violations.filter(v => v.status === 'skipped').length;
+        const skippedTypesCount = this.state.skippedTypes.size;
+        document.getElementById('main').innerHTML = `
+          <div style="text-align:center;padding:60px 20px;">
+            <h1 style="font-size:48px;">🎉</h1>
+            <h2>审核完成</h2>
+            <p>改名 <strong>${renamed}</strong> · 跳过 <strong>${skipped}</strong> · 跳过类型 <strong>${skippedTypesCount}</strong> 种</p>
+            <button onclick="location.reload()" style="margin-top:20px;padding:8px 24px;">重新开始</button>
+          </div>`;
       },
 
       toast(msg, ms = 3000) {
