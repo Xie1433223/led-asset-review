@@ -115,6 +115,7 @@
       },
 
       async scanAndReview(dirHandle) {
+        this._dirHandle = dirHandle;
         this.state.phase = 'scanning';
         const entries = [];
         await ScanEngine.walkFileTree(dirHandle, entry => {
@@ -151,8 +152,162 @@
       },
 
       renderCurrentCard() {
-        // Placeholder — implemented in Task 11
-        document.getElementById('main').innerHTML = `<p>Card Stack 待实现 (Task 11)，当前 ${this.state.violations.length} 个违规</p>`;
+        const v = this.state.violations[this.state.currentIndex];
+        if (!v) {
+          this.renderDone();
+          return;
+        }
+        const cap = this.state.capability;
+        const mainAction = cap === 'rename'
+          ? `<button id="act-rename" style="background:#1a73e8;color:white;">改名</button>`
+          : `<button id="act-copy" style="background:#1a73e8;color:white;">复制建议名</button>`;
+
+        const issuesHtml = v.issues.map(i => `
+          <div class="issue">
+            <span class="tag">${i.tag}</span>
+            <span class="detail">${i.detail}</span>
+            <details><summary>📖 规则原文</summary><pre>${i.ruleRef}</pre></details>
+          </div>`).join('');
+
+        document.getElementById('main').innerHTML = `
+          <div class="card">
+            <div class="card-header">
+              <span class="counter">❌ 违规 ${this.state.currentIndex + 1} / ${this.state.violations.length}</span>
+              <span class="path">📁 ${v.parent}</span>
+            </div>
+            <div class="field">
+              <label>原文件名</label>
+              <div class="filename original">${v.file.name}</div>
+            </div>
+            <div class="field">
+              <label>建议改为</label>
+              <div class="filename-row">
+                <div class="filename suggested">${v.suggestedName || '<em>无法自动重建</em>'}</div>
+                <button class="copy-btn" id="inline-copy" ${!v.suggestedName ? 'disabled' : ''}>📋 复制</button>
+              </div>
+            </div>
+            <div class="issues">${issuesHtml}</div>
+            <div class="actions">
+              <button id="act-skip">跳过</button>
+              <button id="act-skip-type">跳过此类</button>
+              <button id="act-prev" ${this.state.currentIndex === 0 ? 'disabled' : ''}>上一条</button>
+              ${mainAction}
+            </div>
+            <div style="margin-top:16px;text-align:center;">
+              <button id="act-shell" style="background:none;border:none;color:#5f6368;font-size:12px;">📥 生成 rename.sh 兜底</button>
+            </div>
+          </div>
+          <style>
+            .card { background: white; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+            .counter { background: #fce8e6; color: #d93025; padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: bold; }
+            .path { color: #5f6368; font-size: 13px; }
+            .field { margin-bottom: 14px; }
+            .field label { font-size: 12px; color: #5f6368; }
+            .filename { font-family: 'SF Mono', Monaco, monospace; padding: 8px 12px; border-radius: 4px; margin-top: 4px; }
+            .filename.original { background: #fce8e6; }
+            .filename.suggested { background: #e6f4ea; flex: 1; }
+            .filename-row { display: flex; gap: 8px; align-items: stretch; margin-top: 4px; }
+            .copy-btn { padding: 4px 12px; }
+            .issues { margin: 16px 0; padding: 12px; background: #fff8e1; border-radius: 4px; }
+            .issue { margin-bottom: 8px; }
+            .issue .tag { background: #d93025; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px; margin-right: 8px; }
+            .issue pre { background: white; padding: 8px; font-size: 12px; margin-top: 4px; }
+            .actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+            .actions button { padding: 8px 16px; border: 1px solid #dadce0; background: white; border-radius: 4px; cursor: pointer; }
+            .actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+          </style>`;
+
+        // Wire up buttons
+        document.getElementById('inline-copy')?.addEventListener('click', () => this.copySuggested(v));
+        document.getElementById('act-rename')?.addEventListener('click', () => this.doRename(v));
+        document.getElementById('act-copy')?.addEventListener('click', () => this.copySuggested(v));
+        document.getElementById('act-skip').addEventListener('click', () => this.skip(v));
+        document.getElementById('act-skip-type').addEventListener('click', () => this.skipType(v));
+        document.getElementById('act-prev')?.addEventListener('click', () => this.prev());
+        document.getElementById('act-shell').addEventListener('click', () => this.generateShell());
+      },
+
+      copySuggested(v) {
+        if (!v.suggestedName) { this.toast('无法复制：无建议名'); return; }
+        navigator.clipboard.writeText(v.suggestedName).then(
+          () => this.toast('已复制建议名到剪贴板'),
+          e => this.toast('复制失败：' + e.message)
+        );
+      },
+
+      async doRename(v) {
+        const dirHandle = this._dirHandle;
+        if (!dirHandle) { this.toast('内部错误：未记录目录句柄'); return; }
+        if (!v.suggestedName) { this.toast('无法改名：无建议名'); return; }
+
+        try {
+          // Prefer move() if available (Chrome 110+)
+          if (typeof v.file.handle.move === 'function') {
+            await v.file.handle.move(v.suggestedName);
+          } else {
+            // Fallback: copy + delete (older Chrome, Edge)
+            const oldFile = await v.file.handle.getFile();
+            const newHandle = await dirHandle.getFileHandle(v.suggestedName, { create: true });
+            const writable = await newHandle.createWritable();
+            await writable.write(oldFile);
+            await writable.close();
+            await dirHandle.removeEntry(v.file.name);
+          }
+          v.status = 'renamed';
+          this.state.history.push({ type: 'rename', index: this.state.currentIndex });
+          this.state.currentIndex++;
+          this.advancePastSkipped();
+          this.renderCurrentCard();
+        } catch (e) {
+          this.toast('改名失败：' + e.message);
+        }
+      },
+
+      skip(v) {
+        v.status = 'skipped';
+        this.state.history.push({ type: 'skip', index: this.state.currentIndex });
+        this.state.currentIndex++;
+        this.advancePastSkipped();
+        this.renderCurrentCard();
+      },
+
+      skipType(v) {
+        for (const issue of v.issues) this.state.skippedTypes.add(issue.tag);
+        v.status = 'skipped';
+        this.state.history.push({ type: 'skip-type', index: this.state.currentIndex });
+        this.advancePastSkipped();
+        this.renderCurrentCard();
+      },
+
+      advancePastSkipped() {
+        while (this.state.currentIndex < this.state.violations.length) {
+          const next = this.state.violations[this.state.currentIndex];
+          if (next.status !== 'pending' || next.issues.every(i => this.state.skippedTypes.has(i.tag))) {
+            if (next.status === 'pending') next.status = 'skipped';
+            this.state.currentIndex++;
+          } else {
+            break;
+          }
+        }
+      },
+
+      prev() {
+        if (this.state.history.length === 0) return;
+        const last = this.state.history.pop();
+        this.state.violations[last.index].status = 'pending';
+        this.state.currentIndex = last.index;
+        this.renderCurrentCard();
+      },
+
+      generateShell() {
+        // Placeholder — Task 13
+        this.toast('rename.sh 生成待实现 (Task 13)');
+      },
+
+      renderDone() {
+        // Placeholder — Task 13
+        document.getElementById('main').innerHTML = `<h2>完成！</h2>`;
       },
 
       toast(msg, ms = 3000) {
