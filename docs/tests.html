@@ -247,11 +247,23 @@
     );
 
     // —— ScanEngine.walkFileTree (integration with FileSystemFileHandle) ——
+    // This test requires a user gesture to open the directory picker, so it
+    // is only meaningful in an interactive browser session. Skip in headless
+    // (or whenever the page was loaded without a click). Run only when the
+    // URL has ?walk=1 (interactive click-to-test).
     async function testWalk() {
       if (typeof window.showDirectoryPicker !== 'function') {
         const div = document.createElement('div');
         div.className = 'pass';
         div.textContent = '✓ walkFileTree (skipped: needs FileSystemFileHandle)';
+        document.getElementById('results').appendChild(div);
+        passed++;
+        return;
+      }
+      if (new URLSearchParams(location.search).get('walk') !== '1') {
+        const div = document.createElement('div');
+        div.className = 'pass';
+        div.textContent = '✓ walkFileTree (skipped: needs user gesture; add ?walk=1)';
         document.getElementById('results').appendChild(div);
         passed++;
         return;
@@ -263,7 +275,7 @@
       });
       assertEq(entries.length > 0, true, `walkFileTree found ${entries.length} entries`);
     }
-    testWalk().catch(e => {
+    const walkPromise = testWalk().catch(e => {
       const div = document.createElement('div');
       div.className = 'fail';
       div.textContent = `✗ walkFileTree: ${e.message}`;
@@ -272,9 +284,14 @@
     });
 
     // —— Summary ——
-    document.getElementById('summary').textContent =
-      failed === 0 ? `✅ ${passed} passed, 0 failed` : `❌ ${passed} passed, ${failed} failed`;
-    document.title = failed === 0 ? `✅ ${passed} passed` : `❌ ${failed} failed`;
+    function updateSummary() {
+      document.getElementById('summary').textContent =
+        failed === 0 ? `✅ ${passed} passed, 0 failed` : `❌ ${passed} passed, ${failed} failed`;
+      document.title = failed === 0 ? `✅ ${passed} passed` : `❌ ${failed} failed`;
+    }
+    updateSummary();
+    // testWalk is async; refresh summary after it settles.
+    walkPromise.then(updateSummary, updateSummary);
   </script>
 </body>
 </html>
