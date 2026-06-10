@@ -241,6 +241,17 @@
         if (!dirHandle) { this.toast('内部错误：未记录目录句柄'); return; }
         if (!v.suggestedName) { this.toast('无法改名：无建议名'); return; }
 
+        // No-op: suggested name matches original — avoid an unnecessary rename
+        // (some browsers throw when move() is called with the same name)
+        if (v.suggestedName === v.file.name) {
+          v.status = 'renamed';
+          this.state.history.push({ type: 'rename', index: this.state.currentIndex });
+          this.state.currentIndex++;
+          this.advancePastSkipped();
+          this.renderCurrentCard();
+          return;
+        }
+
         try {
           // Prefer move() if available (Chrome 110+)
           if (typeof v.file.handle.move === 'function') {
