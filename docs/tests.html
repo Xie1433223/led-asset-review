@@ -276,6 +276,21 @@
       '去空格'
     );
 
+    // —— T20: 项目约定检查必须与段数错正交（用户实测 case）——
+    const userCase = ScanEngine.validate(
+      'CZ QSJD_101-F_FN_NRS_V01.jpg', '', r, { projectMode: true, checkSeqExt: true }
+    );
+    assertEq(
+      userCase.issues.map(i => i.tag).sort(),
+      ['段数错', '项目约定违反'],
+      'T20: 段数错 + 空格同时报告（不互相吞）'
+    );
+    assertEq(
+      ScanEngine.suggestName('CZ QSJD_101-F_FN_NRS_V01.jpg', userCase.issues, r),
+      'CZQSJD_101-F_FN_N_RS_V01.jpg',
+      'T20: 用户实测 case 一次修两个（去空格 + 拆 NRS）'
+    );
+
     // —— ScanEngine.walkFileTree (integration with FileSystemFileHandle) ——
     // This test requires a user gesture to open the directory picker, so it
     // is only meaningful in an interactive browser session. Skip in headless

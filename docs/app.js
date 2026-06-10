@@ -138,8 +138,11 @@ const ScanEngine = {
         });
       }
     }
+    }
 
-    // Project override: no half-width spaces in parent dir or filename
+    // Project override: no half-width spaces in parent dir or filename.
+    // (Always runs, independent of segment count — a space violation is
+    //  a real issue even when the segment count is also wrong.)
     if (projectMode) {
       if (parent && parent.includes(' ')) {
         issues.push({
@@ -155,7 +158,6 @@ const ScanEngine = {
           ruleRef: '项目级约定 — 父级目录与项目前缀'
         });
       }
-    }
     }
 
     return { issues, suggestedName: null };
