@@ -126,6 +126,35 @@ const ScanEngine = {
       });
     }
 
+    // Field 7: sequence frame extension
+    if (isSequenceFrame && checkSeqExt) {
+      if (!rules.seqExtOptions.includes(ext.toLowerCase())) {
+        issues.push({
+          tag: '序列帧扩展名错',
+          detail: `序列帧扩展名 "${ext}" 必须为 ${rules.seqExtOptions.join(' / ')}`,
+          ruleRef: 'Common Mistakes — 序列帧扩展名'
+        });
+      }
+    }
+
+    // Project override: no half-width spaces in parent dir or filename
+    if (projectMode) {
+      if (parent && parent.includes(' ')) {
+        issues.push({
+          tag: '项目约定违反',
+          detail: `父目录 "${parent}" 包含半角空格，本项目要求无空格`,
+          ruleRef: '项目级约定 — 父级目录与项目前缀'
+        });
+      }
+      if (filename.includes(' ')) {
+        issues.push({
+          tag: '项目约定违反',
+          detail: `文件名 "${filename}" 包含半角空格，本项目要求无空格`,
+          ruleRef: '项目级约定 — 父级目录与项目前缀'
+        });
+      }
+    }
+
     return { issues, suggestedName: null };
   },
 

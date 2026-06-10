@@ -175,6 +175,45 @@
       '摄影原始素材 _M 结尾无需版本号'
     );
 
+    // —— Sequence frame extension check ——
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_CP_V01_00502.png', '', r, opts).issues.find(i => i.tag === '序列帧扩展名错')?.tag,
+      '序列帧扩展名错',
+      '序列帧 .png 非法'
+    );
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_CP_V01_00502.dpx', '', r, opts).issues.find(i => i.tag === '序列帧扩展名错'),
+      undefined,
+      '序列帧 .dpx 合法'
+    );
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_CP_V01_00502.jpg', '', { ...r, seqExtOptions: ['.png', '.jpg'] }, { ...opts, checkSeqExt: true }).issues.find(i => i.tag === '序列帧扩展名错'),
+      undefined,
+      '序列帧 .jpg 在白名单中（自定义 seqExtOptions）'
+    );
+
+    // —— Project override check (项目级约定) ——
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_RS_V01.mov', '常州 戚墅街道', r, { projectMode: true, checkSeqExt: true }).issues.find(i => i.tag === '项目约定违反')?.tag,
+      '项目约定违反',
+      '父目录含半角空格触发项目级警告'
+    );
+    assertEq(
+      ScanEngine.validate('LX ZC_1_NT_N_RS_V01.mov', '常州戚墅街道', r, { projectMode: true, checkSeqExt: true }).issues.find(i => i.tag === '项目约定违反')?.tag,
+      '项目约定违反',
+      '文件名含半角空格触发项目级警告'
+    );
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_RS_V01.mov', '常州戚墅街道', r, { projectMode: true, checkSeqExt: true }).issues.find(i => i.tag === '项目约定违反'),
+      undefined,
+      '无空格时不触发'
+    );
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_RS_V01.mov', '常州 戚墅街道', r, { projectMode: false, checkSeqExt: true }).issues.find(i => i.tag === '项目约定违反'),
+      undefined,
+      '关闭项目模式时不触发'
+    );
+
     // —— Summary ——
     document.getElementById('summary').textContent =
       failed === 0 ? `✅ ${passed} passed, 0 failed` : `❌ ${passed} passed, ${failed} failed`;
