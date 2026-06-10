@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>LED Asset Review · Tests</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 20px; max-width: 960px; margin: 0 auto; }
+    .pass { color: #0d8043; }
+    .fail { color: #d93025; font-weight: bold; }
+    .summary { margin: 20px 0; padding: 10px; background: #f5f5f5; border-radius: 4px; }
+    pre { background: #fafafa; padding: 8px; border-radius: 3px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>🧪 LED Asset Review · Unit Tests</h1>
+  <div id="summary" class="summary">运行中…</div>
+  <div id="results"></div>
+
+  <script src="./app.js"></script>
+  <script>
+    const results = [];
+    let passed = 0, failed = 0;
+
+    function assertEq(actual, expected, label) {
+      const ok = JSON.stringify(actual) === JSON.stringify(expected);
+      const cls = ok ? 'pass' : 'fail';
+      const sym = ok ? '✓' : '✗';
+      const div = document.createElement('div');
+      div.className = cls;
+      div.textContent = `${sym} ${label}`;
+      if (!ok) {
+        const pre = document.createElement('pre');
+        pre.textContent = `  expected: ${JSON.stringify(expected)}\n  actual:   ${JSON.stringify(actual)}`;
+        div.appendChild(pre);
+      }
+      document.getElementById('results').appendChild(div);
+      if (ok) passed++; else failed++;
+    }
+
+    function assertThrows(fn, label) {
+      try {
+        fn();
+        const div = document.createElement('div');
+        div.className = 'fail';
+        div.textContent = `✗ ${label} (expected throw, got nothing)`;
+        document.getElementById('results').appendChild(div);
+        failed++;
+      } catch (e) {
+        const div = document.createElement('div');
+        div.className = 'pass';
+        div.textContent = `✓ ${label}`;
+        document.getElementById('results').appendChild(div);
+        passed++;
+      }
+    }
+
+    // —— Stub test ——
+    assertThrows(() => RuleParser.parse(''), 'RuleParser.parse throws when not implemented');
+    assertThrows(() => ScanEngine.validate('', '', {}), 'ScanEngine.validate throws when not implemented');
+    assertEq(CapabilityDetector.detect().copy, typeof navigator.clipboard?.writeText === 'function', 'CapabilityDetector detects clipboard');
+
+    // —— Summary ——
+    document.getElementById('summary').textContent =
+      failed === 0 ? `✅ ${passed} passed, 0 failed` : `❌ ${passed} passed, ${failed} failed`;
+    document.title = failed === 0 ? `✅ ${passed} passed` : `❌ ${failed} failed`;
+  </script>
+</body>
+</html>
