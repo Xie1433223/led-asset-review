@@ -133,8 +133,12 @@
         const checkSeqExt = document.getElementById('tog-seqext')?.checked ?? true;
         const violations = [];
         for (const entry of entries) {
-          const { issues, suggestedName } = ScanEngine.validate(entry.name, entry.parent, this.state.rules, { projectMode, checkSeqExt });
+          const { issues } = ScanEngine.validate(entry.name, entry.parent, this.state.rules, { projectMode, checkSeqExt });
           if (issues.length > 0) {
+            // validate() only reports issues; the actual fix is computed by
+            // suggestName(). Without this call, the UI would always show
+            // "无法自动重建" for every card.
+            const suggestedName = ScanEngine.suggestName(entry.name, issues, this.state.rules);
             violations.push({ file: entry, parent: entry.parent, issues, suggestedName, status: 'pending' });
           }
         }

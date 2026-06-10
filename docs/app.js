@@ -160,7 +160,7 @@ const ScanEngine = {
       }
     }
 
-    return { issues, suggestedName: null };
+    return { issues };
   },
 
   suggestName(filename, issues, rules) {

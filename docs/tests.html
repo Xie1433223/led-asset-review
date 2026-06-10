@@ -291,6 +291,21 @@
       'T20: 用户实测 case 一次修两个（去空格 + 拆 NRS）'
     );
 
+    // —— T21: validate() 只报 issues，建议名必须由调用方单独调 suggestName() ——
+    assertEq(
+      Object.keys(ScanEngine.validate('LXZC_1_NT_NRS_V01.mov', '', r, opts)).sort(),
+      ['issues'],
+      'T21: validate() 不再返回 suggestedName（避免 UI 误用）'
+    );
+    // 模拟 UI 流程：validate 拿到 issues → 单独调 suggestName → 拿到建议名
+    const flow = ScanEngine.validate('LXZC_1_NT_NRS_V01.mov', '', r, opts);
+    const flowSuggestion = ScanEngine.suggestName('LXZC_1_NT_NRS_V01.mov', flow.issues, r);
+    assertEq(
+      flowSuggestion,
+      'LXZC_1_NT_N_RS_V01.mov',
+      'T21: UI 流程（validate + suggestName）能拿到建议名'
+    );
+
     // —— ScanEngine.walkFileTree (integration with FileSystemFileHandle) ——
     // This test requires a user gesture to open the directory picker, so it
     // is only meaningful in an interactive browser session. Skip in headless
