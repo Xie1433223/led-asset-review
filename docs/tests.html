@@ -214,6 +214,38 @@
       '关闭项目模式时不触发'
     );
 
+    // —— ScanEngine.suggestName ——
+    // 场景：NRS 黏合 → 拆成 N_RS
+    assertEq(
+      ScanEngine.suggestName('CZQSJD_101-F_FN_NRS_V01.mov', [], r),
+      'CZQSJD_101-F_FN_N_RS_V01.mov',
+      'NRS 黏合 → N_RS'
+    );
+    // 场景：版本号格式错 v1 → V01
+    assertEq(
+      ScanEngine.suggestName('LXZC_1_NT_N_RS_v1.mov', [], r),
+      'LXZC_1_NT_N_RS_V01.mov',
+      '版本号 v1 → V01'
+    );
+    // 场景：名字无违规 → 原样返回
+    assertEq(
+      ScanEngine.suggestName('LXZC_1_NT_N_RS_V01.mov', [], r),
+      'LXZC_1_NT_N_RS_V01.mov',
+      '无违规原样返回'
+    );
+    // 场景：段数错 → 返回 null（无法可靠重建）
+    assertEq(
+      ScanEngine.suggestName('LXZC_1_NT.mov', [{ tag: '段数错' }], r),
+      null,
+      '段数错无法重建 → null'
+    );
+    // 场景：名字含空格 → 去掉空格
+    assertEq(
+      ScanEngine.suggestName('LX ZC_1_NT_N_RS_V01.mov', [], r),
+      'LXZC_1_NT_N_RS_V01.mov',
+      '去空格'
+    );
+
     // —— Summary ——
     document.getElementById('summary').textContent =
       failed === 0 ? `✅ ${passed} passed, 0 failed` : `❌ ${passed} passed, ${failed} failed`;

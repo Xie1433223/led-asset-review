@@ -159,7 +159,39 @@ const ScanEngine = {
   },
 
   suggestName(filename, issues, rules) {
-    throw new Error('ScanEngine.suggestName not yet implemented');
+    if (issues.some(i => i.tag === '段数错')) return null;
+
+    const ext = filename.match(/\.[^.]+$/)?.[0] || '';
+    const base = ext ? filename.slice(0, -ext.length) : filename;
+
+    // Fix 1: strip half-width spaces
+    let fixed = base.replace(/ /g, '');
+
+    // Fix 2: NRS-style glued field — look for `<weather><method>` glue (e.g., NRS, NVE, NCS)
+    // Detected by: a chunk that's exactly N|R|S|CS|W|F + RS|RVC|VE|CP|DC|UE|CG|CPM|DCM|CGM|M
+    const methodCodes = [...Object.keys(rules.methods.video), ...Object.keys(rules.methods.project), ...Object.keys(rules.methods.material)];
+    const weatherCodes = Object.keys(rules.weatherCodes);
+    for (const w of weatherCodes) {
+      for (const m of methodCodes) {
+        const glued = w + m;
+        const gluedRe = new RegExp(`(?<=[^A-Z])${glued}(?=[_])`, 'g');
+        if (gluedRe.test(fixed)) {
+          fixed = fixed.replace(gluedRe, `${w}_${m}`);
+          break;
+        }
+      }
+    }
+
+    // Fix 3: version — find segment matching ^v\d{1,2}$ and normalize to V + 2 digits
+    const parts = fixed.split('_');
+    const versionIdx = parts.length === 7 ? 5 : 5;  // same position for both
+    if (parts[versionIdx] && /^v\d{1,2}$/i.test(parts[versionIdx])) {
+      const num = parts[versionIdx].match(/\d+/)[0].padStart(2, '0');
+      parts[versionIdx] = `V${num}`;
+      fixed = parts.join('_');
+    }
+
+    return fixed + ext;
   },
 
   async walkFileTree(handle, onEntry) {
