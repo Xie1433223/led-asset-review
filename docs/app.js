@@ -58,11 +58,13 @@ const ScanEngine = {
     if (parts.length !== expectedSegments) {
       issues.push({
         tag: '段数错',
-        detail: `预期 ${expectedSegments} 段（${isSequenceFrame ? '序列帧' : '成品'}），实际 ${parts.length} 段`,
+        detail: `预期 ${expectedSegments} 段（${isSequenceFrame ? '序列帧' : '成品'}），实际 ${parts.length} 段 — 可能是字段黏合，可尝试自动修复`,
         ruleRef: 'Quick Reference — 五种命名方式'
       });
-      return { issues, suggestedName: null };
-    }
+      // Do NOT early-return: per-field validation is meaningless when segment
+      // count is wrong (we don't know where fields start/end), but we leave
+      // it to suggestName() to attempt a glue-split recovery.
+    } else {
 
     // Field 1: scene code (or project+scene concat)
     const sceneCode = parts[0];
@@ -154,42 +156,122 @@ const ScanEngine = {
         });
       }
     }
+    }
 
     return { issues, suggestedName: null };
   },
 
   suggestName(filename, issues, rules) {
-    if (issues.some(i => i.tag === '段数错')) return null;
-
     const ext = filename.match(/\.[^.]+$/)?.[0] || '';
     const base = ext ? filename.slice(0, -ext.length) : filename;
+
+    // Expected segment count (needed to verify the fix actually resolves 段数错)
+    const isSequenceFrame = /_\d{5}$/.test(base);
+    const isCameraOriginal = base.split('_')[4] === 'M';
+    const expectedSegments = isSequenceFrame ? 7 : (isCameraOriginal ? 5 : 6);
 
     // Fix 1: strip half-width spaces
     let fixed = base.replace(/ /g, '');
 
-    // Fix 2: NRS-style glued field — look for `<weather><method>` glue (e.g., NRS, NVE, NCS)
-    // Detected by: a chunk that's exactly N|R|S|CS|W|F + RS|RVC|VE|CP|DC|UE|CG|CPM|DCM|CGM|M
-    const methodCodes = [...Object.keys(rules.methods.video), ...Object.keys(rules.methods.project), ...Object.keys(rules.methods.material)];
-    const weatherCodes = Object.keys(rules.weatherCodes);
-    for (const w of weatherCodes) {
-      for (const m of methodCodes) {
-        const glued = w + m;
-        const gluedRe = new RegExp(`(?<=[^A-Z])${glued}(?=[_])`, 'g');
-        if (gluedRe.test(fixed)) {
-          fixed = fixed.replace(gluedRe, `${w}_${m}`);
-          break;
+    // Fix 2: NRS-style glue — for any segment that's not a known single code,
+    // try to split it into 2+ known codes via DP. The segment must end on a
+    // method (since segments always end on a method in the spec). If DP
+    // succeeds, replace the segment with the split pieces.
+    const allSingleCodes = new Set([
+      ...Object.keys(rules.timeCodes),
+      ...Object.keys(rules.weatherCodes),
+      ...Object.keys(rules.methods.video),
+      ...Object.keys(rules.methods.project),
+      ...Object.keys(rules.methods.material)
+    ]);
+    const methodCodes = new Set([
+      ...Object.keys(rules.methods.video),
+      ...Object.keys(rules.methods.project),
+      ...Object.keys(rules.methods.material)
+    ]);
+
+    function splitGluedSegment(seg) {
+      // If already a known single code, no split needed
+      if (allSingleCodes.has(seg)) return [seg];
+
+      // Pre-strip: if segment ends with a version-like suffix (v\d{1,2} or
+      // V\d{1,2}), peel it off so the DP only has to handle field 3-5 glue.
+      // Without this, NRSv1 wouldn't parse (v1 isn't a known code).
+      let workSeg = seg;
+      let versionSuffix = null;
+      const versionMatch = seg.match(/^(.+?)([vV]\d{1,2})$/);
+      if (versionMatch) {
+        workSeg = versionMatch[1];
+        versionSuffix = versionMatch[2];
+        if (allSingleCodes.has(workSeg)) {
+          return [workSeg, versionSuffix];
         }
       }
+
+      // DP: find the minimum-piece partition where every piece is a known
+      // code. The last piece must be a method (since segments always end on
+      // a method in the spec). Earlier pieces can be T/W or method in any
+      // order (we don't enforce alternation — fields 3-5 can have multiple
+      // T/W values glued together, e.g. FNNRS → FN + N + RS).
+      const n = workSeg.length;
+      const dp = new Array(n + 1).fill(Infinity);
+      const parent = new Array(n + 1).fill(-1);
+      dp[0] = 0;
+
+      for (let i = 1; i <= n; i++) {
+        for (let j = 0; j < i; j++) {
+          if (dp[j] === Infinity) continue;
+          const candidate = workSeg.slice(j, i);
+          if (methodCodes.has(candidate) || allSingleCodes.has(candidate)) {
+            if (dp[j] + 1 < dp[i]) {
+              dp[i] = dp[j] + 1;
+              parent[i] = j;
+            }
+          }
+        }
+      }
+
+      if (dp[n] === Infinity) return null;  // no valid partition
+
+      // Reconstruct
+      const pieces = [];
+      let pos = n;
+      while (pos > 0) {
+        const prev = parent[pos];
+        pieces.unshift(workSeg.slice(prev, pos));
+        pos = prev;
+      }
+
+      // Last piece must be a method (segments end on a method)
+      if (!methodCodes.has(pieces[pieces.length - 1])) return null;
+      if (versionSuffix) pieces.push(versionSuffix);
+      return pieces;
     }
 
-    // Fix 3: version — find segment matching ^v\d{1,2}$ and normalize to V + 2 digits
     const parts = fixed.split('_');
-    const versionIdx = parts.length === 7 ? 5 : 5;  // same position for both
-    if (parts[versionIdx] && /^v\d{1,2}$/i.test(parts[versionIdx])) {
-      const num = parts[versionIdx].match(/\d+/)[0].padStart(2, '0');
-      parts[versionIdx] = `V${num}`;
-      fixed = parts.join('_');
+    const recovered = [];
+    for (const seg of parts) {
+      const split = splitGluedSegment(seg);
+      if (split) {
+        recovered.push(...split);
+      } else {
+        recovered.push(seg);
+      }
     }
+    fixed = recovered.join('_');
+
+    // Fix 3: version — find segment matching ^v\d{1,2}$ and normalize to V + 2 digits
+    const versionIdx = fixed.split('_').length === 7 ? 5 : 5;
+    const partsForVer = fixed.split('_');
+    if (partsForVer[versionIdx] && /^v\d{1,2}$/i.test(partsForVer[versionIdx])) {
+      const num = partsForVer[versionIdx].match(/\d+/)[0].padStart(2, '0');
+      partsForVer[versionIdx] = `V${num}`;
+      fixed = partsForVer.join('_');
+    }
+
+    // Verify the fix actually resolves segment count.
+    // If the result still has wrong count, give up (return null).
+    if (fixed.split('_').length !== expectedSegments) return null;
 
     return fixed + ext;
   },

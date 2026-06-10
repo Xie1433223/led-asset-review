@@ -233,11 +233,41 @@
       'LXZC_1_NT_N_RS_V01.mov',
       '无违规原样返回'
     );
-    // 场景：段数错 → 返回 null（无法可靠重建）
+    // 场景：段数错 + 无可恢复黏合 → 返回 null
     assertEq(
       ScanEngine.suggestName('LXZC_1_NT.mov', [{ tag: '段数错' }], r),
       null,
-      '段数错无法重建 → null'
+      '段数错且无黏合可恢复 → null'
+    );
+    // 场景：NRS 黏合导致段数 5 → 拆出 N_RS
+    assertEq(
+      ScanEngine.suggestName('LXZC_1_NT_NRS_V01.mov', [{ tag: '段数错' }], r),
+      'LXZC_1_NT_N_RS_V01.mov',
+      '段数错 + NRS 黏合 → N_RS'
+    );
+    // 场景：FNNRS 多步黏合（FN + N + RS）→ 拆出三段
+    assertEq(
+      ScanEngine.suggestName('LXZC_1_FNNRS_V01.mov', [{ tag: '段数错' }], r),
+      'LXZC_1_FN_N_RS_V01.mov',
+      '段数错 + 多步黏合 FNNRS → FN + N + RS'
+    );
+    // 场景：NRS 黏合 + 段数正确 → 走 NRS 路径（验证 NRS 仍能正常修复）
+    assertEq(
+      ScanEngine.suggestName('LXZC_1_NT_N_RS_V01.mov', [], r),
+      'LXZC_1_NT_N_RS_V01.mov',
+      '无违规原样返回（被拆成 6 段后段数对，零变更）'
+    );
+    // 场景：NRS 黏合 + 版本号 v1 两位化 + 段数错 → 一次性修复
+    assertEq(
+      ScanEngine.suggestName('LXZC_1_NT_NRSv1.mov', [{ tag: '段数错' }], r),
+      'LXZC_1_NT_N_RS_V01.mov',
+      '段数错 + NRS + v1 → 全部修复'
+    );
+    // 场景：去空格后段数变对 + 黏合可拆 → 一次过
+    assertEq(
+      ScanEngine.suggestName('LX ZC_1_NT_NRS_V01.mov', [{ tag: '段数错' }], r),
+      'LXZC_1_NT_N_RS_V01.mov',
+      '段数错 + 空格 + NRS 黏合 → 一次过'
     );
     // 场景：名字含空格 → 去掉空格
     assertEq(
