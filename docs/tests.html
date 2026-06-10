@@ -137,6 +137,44 @@
       '场景码含小写字母'
     );
 
+    // —— ScanEngine.validate: fields 2-6 ——
+    assertEq(
+      ScanEngine.validate('LXZC_X_NT_N_RS_V01.mov', '', r, opts).issues.find(i => i.tag === '镜号格式错')?.tag,
+      '镜号格式错',
+      '镜号非数字'
+    );
+    assertEq(
+      ScanEngine.validate('LXZC_1_NIGHT_N_RS_V01.mov', '', r, opts).issues.find(i => i.tag === '时间码未知')?.tag,
+      '时间码未知',
+      '时间码 NIGHT 不在字典'
+    );
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_RAIN_RS_V01.mov', '', r, opts).issues.find(i => i.tag === '天气码未知')?.tag,
+      '天气码未知',
+      '天气码 RAIN 不在字典'
+    );
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_XX_V01.mov', '', r, opts).issues.find(i => i.tag === '工序码未知')?.tag,
+      '工序码未知',
+      '工序码 XX 不在字典'
+    );
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_RS_v1.mov', '', r, opts).issues.find(i => i.tag === '版本号格式错')?.tag,
+      '版本号格式错',
+      '版本号 v1 小写'
+    );
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_RS_V1.mov', '', r, opts).issues.find(i => i.tag === '版本号格式错')?.tag,
+      '版本号格式错',
+      '版本号 V1 一位'
+    );
+    // Camera-original `_M` ends without version: should NOT trigger 版本号格式错
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_M', '', r, opts).issues.find(i => i.tag === '版本号格式错'),
+      undefined,
+      '摄影原始素材 _M 结尾无需版本号'
+    );
+
     // —— Summary ——
     document.getElementById('summary').textContent =
       failed === 0 ? `✅ ${passed} passed, 0 failed` : `❌ ${passed} passed, ${failed} failed`;

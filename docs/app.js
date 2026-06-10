@@ -50,7 +50,8 @@ const ScanEngine = {
     const ext = filename.match(/\.[^.]+$/)?.[0] || '';
     const base = ext ? filename.slice(0, -ext.length) : filename;
     const isSequenceFrame = /_\d{5}$/.test(base);
-    const expectedSegments = isSequenceFrame ? 7 : 6;
+    const isCameraOriginal = base.split('_')[4] === 'M';
+    const expectedSegments = isSequenceFrame ? 7 : (isCameraOriginal ? 5 : 6);
 
     // Split by underscore
     const parts = base.split('_');
@@ -70,6 +71,58 @@ const ScanEngine = {
         tag: '场景码非法',
         detail: `字段 1 "${sceneCode}" 必须是大写字母、长度 2-10`,
         ruleRef: '字段 1：场景名称'
+      });
+    }
+
+    // Field 2: shot number (regular or car-shot)
+    const shot = parts[1];
+    if (!/^(\d{3}-[FRBLT]|\d+)$/.test(shot)) {
+      issues.push({
+        tag: '镜号格式错',
+        detail: `字段 2 "${shot}" 必须是数字或车拍格式 101-F`,
+        ruleRef: '字段 2：镜头序号'
+      });
+    }
+
+    // Field 3: time code
+    const timeCode = parts[2];
+    if (!rules.timeCodes[timeCode]) {
+      issues.push({
+        tag: '时间码未知',
+        detail: `字段 3 "${timeCode}" 不在时间码字典中`,
+        ruleRef: '字段 3：场景气氛时间'
+      });
+    }
+
+    // Field 4: weather code
+    const weatherCode = parts[3];
+    if (!rules.weatherCodes[weatherCode]) {
+      issues.push({
+        tag: '天气码未知',
+        detail: `字段 4 "${weatherCode}" 不在天气码字典中`,
+        ruleRef: '字段 4：场景天气状态'
+      });
+    }
+
+    // Field 5: method code (try video dict first, fall back to project dict)
+    const methodCode = parts[4];
+    const methodDict = { ...rules.methods.project, ...rules.methods.video };
+    if (!methodDict[methodCode]) {
+      issues.push({
+        tag: '工序码未知',
+        detail: `字段 5 "${methodCode}" 不在制作方式/工序字典中`,
+        ruleRef: '字段 5a/5b：制作方式 / 制作工序'
+      });
+    }
+
+    // Field 6: version (skip for camera-original _M folders)
+    const version = parts[5];
+    const isCameraOriginalMethod = methodCode === 'M';
+    if (!isCameraOriginalMethod && !rules.versionPattern.test(version)) {
+      issues.push({
+        tag: '版本号格式错',
+        detail: `字段 6 "${version}" 必须是 V + 两位数（V01-V99）`,
+        ruleRef: '字段 6：版本号'
       });
     }
 
