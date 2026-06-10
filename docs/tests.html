@@ -55,9 +55,59 @@
     }
 
     // —— Stub test ——
-    assertThrows(() => RuleParser.parse(''), 'RuleParser.parse throws when not implemented');
     assertThrows(() => ScanEngine.validate('', '', {}), 'ScanEngine.validate throws when not implemented');
     assertEq(CapabilityDetector.detect().copy, typeof navigator.clipboard?.writeText === 'function', 'CapabilityDetector detects clipboard');
+
+    // —— RuleParser ——
+    const SAMPLE_SKILL = `# LED Test Doc
+
+### 字段 3：场景气氛时间
+| 中文 | 代码 |
+|---|---|
+| 日出前 | \`BSR\` — Before Sunrise |
+| 上午 | \`FN\` — Forenoon |
+| 中午 | \`Nn\` — Noon |
+| 夜晚 | \`NT\` — Night |
+| 黄昏转夜晚 | \`NF-NT\` — Nightfall-to-Night |
+
+### 字段 4：场景天气状态
+| 中文 | 代码 |
+|---|---|
+| 正常天气 | \`N\` — Normal |
+| 下雨 | \`R\` — Rain |
+
+### 字段 5a：制作方式描述（用于最终视频成品）
+| 中文 | 代码 |
+|---|---|
+| 全实拍场景 | \`RS\` — RealShot |
+| 全 CG 视效 | \`VE\` — VFX/Engine |
+
+### 字段 6：版本号
+同一对象不同版本：\`V01 / V02 / V03\`，恒为两位数，前缀 \`V\` 大写。
+
+### 字段 2：镜头序号
+车拍：\`101-F、102-R、103-B、104-L、105-T\`
+
+## Quick Reference — 五种命名方式
+| 最终视频成品 | \`场景_序号_气氛时间_天气_制作方式_版本\` | \`LXZC_1_NT_N_RS_V01\` |
+| 摄影机原始素材文件夹 | \`场景_序号_气氛时间_天气_M\` | \`LXZC_1_NT_N_M\` |
+| 序列帧文件 | \`场景_序号_气氛时间_天气_制作工序_版本_序列帧号.ext\` | \`LXZC_1_NT_N_CP_V01_00502.dpx\` |`;
+
+    const rules = RuleParser.parse(SAMPLE_SKILL);
+    assertEq(rules.timeCodes.NT, '夜晚', '时间码 NT → 夜晚');
+    assertEq(rules.timeCodes.FN, '上午', '时间码 FN → 上午');
+    assertEq(rules.timeCodes['NF-NT'], '黄昏转夜晚', '时间码 NF-NT（连字符字段内部）');
+    assertEq(rules.weatherCodes.N, '正常天气', '天气码 N → 正常天气');
+    assertEq(rules.weatherCodes.R, '下雨', '天气码 R → 下雨');
+    assertEq(rules.methods.video.RS, '全实拍场景', '制作方式 RS');
+    assertEq(rules.methods.video.VE, '全 CG 视效', '制作方式 VE');
+    assertEq(rules.versionPattern.test('V01'), true, '版本号 V01 合法');
+    assertEq(rules.versionPattern.test('V1'), false, '版本号 V1 非法');
+    assertEq(rules.shotPattern.test('101-F'), true, '车拍镜号 101-F');
+    assertEq(rules.shotPattern.test('1'), true, '普通镜号 1');
+    assertEq(rules.sequencePattern.test('00502'), true, '序列帧 00502');
+    assertEq(rules.extOptions, ['.mov', '.mp4'], '视频扩展名白名单');
+    assertEq(rules.seqExtOptions, ['.dpx', '.exr', '.tiff'], '序列帧扩展名白名单');
 
     // —— Summary ——
     document.getElementById('summary').textContent =
