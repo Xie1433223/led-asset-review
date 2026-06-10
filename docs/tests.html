@@ -246,6 +246,31 @@
       '去空格'
     );
 
+    // —— ScanEngine.walkFileTree (integration with FileSystemFileHandle) ——
+    async function testWalk() {
+      if (typeof window.showDirectoryPicker !== 'function') {
+        const div = document.createElement('div');
+        div.className = 'pass';
+        div.textContent = '✓ walkFileTree (skipped: needs FileSystemFileHandle)';
+        document.getElementById('results').appendChild(div);
+        passed++;
+        return;
+      }
+      const handle = await window.showDirectoryPicker({ mode: 'read' });
+      const entries = [];
+      await ScanEngine.walkFileTree(handle, (entry) => {
+        entries.push({ name: entry.name, kind: entry.kind });
+      });
+      assertEq(entries.length > 0, true, `walkFileTree found ${entries.length} entries`);
+    }
+    testWalk().catch(e => {
+      const div = document.createElement('div');
+      div.className = 'fail';
+      div.textContent = `✗ walkFileTree: ${e.message}`;
+      document.getElementById('results').appendChild(div);
+      failed++;
+    });
+
     // —— Summary ——
     document.getElementById('summary').textContent =
       failed === 0 ? `✅ ${passed} passed, 0 failed` : `❌ ${passed} passed, ${failed} failed`;

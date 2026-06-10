@@ -194,8 +194,20 @@ const ScanEngine = {
     return fixed + ext;
   },
 
-  async walkFileTree(handle, onEntry) {
-    throw new Error('ScanEngine.walkFileTree not yet implemented');
+  async walkFileTree(handle, onEntry, parentPath = '') {
+    // Yield to event loop every 100 entries to keep UI responsive
+    let count = 0;
+    for await (const [name, child] of handle.entries()) {
+      const path = parentPath ? `${parentPath}/${name}` : name;
+      onEntry({ name, path, kind: child.kind, handle: child });
+      if (child.kind === 'directory') {
+        await this.walkFileTree(child, onEntry, path);
+      }
+      count++;
+      if (count % 100 === 0) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
   }
 };
 
