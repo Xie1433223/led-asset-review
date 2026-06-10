@@ -55,7 +55,6 @@
     }
 
     // —— Stub test ——
-    assertThrows(() => ScanEngine.validate('', '', {}), 'ScanEngine.validate throws when not implemented');
     assertEq(CapabilityDetector.detect().copy, typeof navigator.clipboard?.writeText === 'function', 'CapabilityDetector detects clipboard');
 
     // —— RuleParser ——
@@ -108,6 +107,35 @@
     assertEq(rules.sequencePattern.test('00502'), true, '序列帧 00502');
     assertEq(rules.extOptions, ['.mov', '.mp4'], '视频扩展名白名单');
     assertEq(rules.seqExtOptions, ['.dpx', '.exr', '.tiff'], '序列帧扩展名白名单');
+
+    // —— ScanEngine.validate: segment count + field 1 ——
+    const r = rules;
+    const opts = { projectMode: true, checkSeqExt: true };
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_N_RS_V01.mov', '', r, opts).issues,
+      [],
+      '通用规范正确样例 0 issues'
+    );
+    assertEq(
+      ScanEngine.validate('L_1_NT_N_RS_V01.mov', '', r, opts).issues[0].tag,
+      '场景码非法',
+      '场景码 1 字符过短（< 2）'
+    );
+    assertEq(
+      ScanEngine.validate('LXZCXZABCDE_1_NT_N_RS_V01.mov', '', r, opts).issues[0].tag,
+      '场景码非法',
+      '场景码 11 字符超长（> 10 范围）'
+    );
+    assertEq(
+      ScanEngine.validate('LXZC_1_NT_NRS_V01.mov', '', r, opts).issues[0].tag,
+      '段数错',
+      'NRS 黏合导致段数 5 而非 6'
+    );
+    assertEq(
+      ScanEngine.validate('ab_1_NT_N_RS_V01.mov', '', r, opts).issues[0].tag,
+      '场景码非法',
+      '场景码含小写字母'
+    );
 
     // —— Summary ——
     document.getElementById('summary').textContent =

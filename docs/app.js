@@ -42,8 +42,38 @@ const RuleParser = {
 };
 
 const ScanEngine = {
-  validate(filename, parent, rules, options) {
-    throw new Error('ScanEngine.validate not yet implemented');
+  validate(filename, parent, rules, options = {}) {
+    const issues = [];
+    const { projectMode = true, checkSeqExt = true } = options;
+
+    // Strip extension
+    const ext = filename.match(/\.[^.]+$/)?.[0] || '';
+    const base = ext ? filename.slice(0, -ext.length) : filename;
+    const isSequenceFrame = /_\d{5}$/.test(base);
+    const expectedSegments = isSequenceFrame ? 7 : 6;
+
+    // Split by underscore
+    const parts = base.split('_');
+    if (parts.length !== expectedSegments) {
+      issues.push({
+        tag: '段数错',
+        detail: `预期 ${expectedSegments} 段（${isSequenceFrame ? '序列帧' : '成品'}），实际 ${parts.length} 段`,
+        ruleRef: 'Quick Reference — 五种命名方式'
+      });
+      return { issues, suggestedName: null };
+    }
+
+    // Field 1: scene code (or project+scene concat)
+    const sceneCode = parts[0];
+    if (!/^[A-Z]{2,10}$/.test(sceneCode)) {
+      issues.push({
+        tag: '场景码非法',
+        detail: `字段 1 "${sceneCode}" 必须是大写字母、长度 2-10`,
+        ruleRef: '字段 1：场景名称'
+      });
+    }
+
+    return { issues, suggestedName: null };
   },
 
   suggestName(filename, issues, rules) {
