@@ -311,17 +311,23 @@
         }
 
         try {
-          // Prefer move() if available (Chrome 110+) — handles cross-dir moves
+          // Prefer move() if available (Chrome 110+). On most APFS / boot
+          // disk cases this is fast and works. But on non-APFS volumes
+          // (exFAT, SMB/NFS mounts, external drives), Chrome's FSA
+          // snapshot for move() can be invalidated aggressively, throwing
+          // InvalidStateError. Fall back to copy+remove in that case —
+          // it uses a different FSA path (getFile → createWritable →
+          // removeEntry) that isn't subject to the same snapshot check.
           if (typeof liveFileHandle.move === 'function') {
-            await liveFileHandle.move(v.suggestedName);
+            try {
+              await liveFileHandle.move(v.suggestedName);
+            } catch (moveErr) {
+              console.warn('move() failed, falling back to copy+remove:', moveErr.message, { file: v.file.name });
+              await this._copyAndRemove(parentHandle, liveFileHandle, v.file.name, v.suggestedName);
+            }
           } else {
-            // Fallback: copy + delete (older Chrome, Edge)
-            const oldFile = await liveFileHandle.getFile();
-            const newHandle = await parentHandle.getFileHandle(v.suggestedName, { create: true });
-            const writable = await newHandle.createWritable();
-            await writable.write(oldFile);
-            await writable.close();
-            await parentHandle.removeEntry(v.file.name);
+            // Older browsers without move() at all — copy+remove is the only path.
+            await this._copyAndRemove(parentHandle, liveFileHandle, v.file.name, v.suggestedName);
           }
           v.status = 'renamed';
           this.state.history.push({ type: 'rename', index: this.state.currentIndex });
@@ -330,8 +336,20 @@
           this.renderCurrentCard();
         } catch (e) {
           console.error('rename failed:', e, { file: v.file.name, to: v.suggestedName, pathSegments: v.file.pathSegments, stack: e.stack });
-          this.toast('改名失败：' + e.message);
+          this.toast('改名失败：' + e.message + '（可改用 📥 生成 rename.sh 兜底）');
         }
+      },
+
+      // Copy file content to a new name, then remove the old. Used as a
+      // fallback when move() throws InvalidStateError. Slower than move()
+      // (reads + writes file bytes) but works on more file system types.
+      async _copyAndRemove(parentHandle, oldFileHandle, oldName, newName) {
+        const oldFile = await oldFileHandle.getFile();
+        const newHandle = await parentHandle.getFileHandle(newName, { create: true });
+        const writable = await newHandle.createWritable();
+        await writable.write(oldFile);
+        await writable.close();
+        await parentHandle.removeEntry(oldName);
       },
 
       skip(v) {
