@@ -25,7 +25,10 @@
 <body>
   <div class="header">
     <h1>🎬 LED Asset Review</h1>
-    <span id="cap-badge" class="badge">检测中…</span>
+    <div>
+      <button id="repick-btn" style="display:none;margin-right:12px;padding:4px 12px;font-size:13px;background:white;border:1px solid #dadce0;border-radius:4px;cursor:pointer;">🔄 换目录</button>
+      <span id="cap-badge" class="badge">检测中…</span>
+    </div>
   </div>
   <div class="main" id="main">
     <!-- boot / drop zone / cards rendered here -->
@@ -55,6 +58,11 @@
         } catch (e) {
           this.showBootError('加载规则失败：' + e.message);
         }
+
+        // Wire the repick button once. It only becomes visible after a
+        // directory is scanned (see runValidation). Clicking calls
+        // repickDirectory() which clears root + state and re-picks.
+        document.getElementById('repick-btn').addEventListener('click', () => this.repickDirectory());
       },
 
       showBootError(msg) {
@@ -167,6 +175,8 @@
         } else {
           this.renderCurrentCard();
         }
+        // Show the repick button — only useful after a directory is loaded
+        document.getElementById('repick-btn').style.display = 'inline-block';
       },
 
       renderAllClean() {
@@ -416,6 +426,25 @@
           cur = await cur.getDirectoryHandle(seg, { create: false });
         }
         return cur;
+      },
+
+      // Discard the current root handle and re-pick a directory. Use this
+      // when the user switches to a different disk/volume in the same
+      // session — the drag-drop FSA handle from the old disk may have
+      // its root snapshot invalidated by Chrome, and re-walking from it
+      // can't recover (the root itself is the problem). A fresh picker
+      // gets a brand-new root handle bound to the current state.
+      async repickDirectory() {
+        this._dirHandle = null;
+        this.state.violations = [];
+        this.state.currentIndex = 0;
+        this.state.history = [];
+        this.state.skippedTypes = new Set();
+        this.state.phase = 'boot';
+        document.getElementById('repick-btn').style.display = 'none';
+        await this.handlePicker();
+        // handlePicker() on success calls scanAndReview() which calls
+        // runValidation() which sets phase=reviewing and shows the button.
       }
     };
 
