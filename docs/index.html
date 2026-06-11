@@ -300,6 +300,29 @@
           return;
         }
 
+        // Permission gate. Drag-drop in Chrome returns a handle with READ
+        // permission by default — not write. showDirectoryPicker() with
+        // {mode:'readwrite'} explicitly grants write. If the user dragged
+        // the directory in, we have to ask for write permission on the
+        // live parent handle before any mutation, or Chrome throws
+        // NoModificationAllowedError. On macOS this pops a native
+        // permission prompt.
+        try {
+          if (typeof parentHandle.queryPermission === 'function') {
+            let perm = await parentHandle.queryPermission({ mode: 'readwrite' });
+            if (perm !== 'granted') {
+              perm = await parentHandle.requestPermission({ mode: 'readwrite' });
+            }
+            if (perm !== 'granted') {
+              this.toast('需要写权限才能改名，请在弹窗中允许');
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('permission check failed:', e);
+          // Continue anyway — some Chromium variants lack queryPermission
+        }
+
         // Re-resolve a fresh file handle from the live parent.
         let liveFileHandle;
         try {
