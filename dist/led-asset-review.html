@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>LED Asset Review</title>
+  <!--
+    LED Asset Review · 单文件发行版
+    由 docs/index.html + docs/app.js + docs/SKILL.md 合并而成
+    双击 / file:// 即可打开,无需 http server
+    规则数据嵌入在下方的 <script type="text/markdown" id="skill-rules"> 块中
+  -->
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; background: #fafafa; color: #202124; }
+    .header { background: white; padding: 12px 24px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; font-size: 18px; }
+    .badge { font-size: 12px; padding: 4px 10px; border-radius: 12px; }
+    .badge-rename { background: #e6f4ea; color: #0d8043; }
+    .badge-copy { background: #fef7e0; color: #b06000; }
+    .main { max-width: 720px; margin: 40px auto; padding: 0 20px; }
+    .drop-zone { background: white; border: 2px dashed #9aa0a6; border-radius: 8px; padding: 60px 20px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .drop-zone:hover, .drop-zone.dragover { background: #f0f7ff; border-color: #1a73e8; }
+    .drop-zone h2 { margin: 0 0 8px; color: #5f6368; }
+    .drop-zone p { margin: 0; color: #80868b; font-size: 14px; }
+    .boot-error { background: #fce8e6; border: 1px solid #d93025; color: #d93025; padding: 20px; border-radius: 4px; text-align: center; }
+    .boot-error button { margin-top: 12px; padding: 6px 16px; background: #d93025; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .toast { position: fixed; bottom: 20px; right: 20px; background: #202124; color: white; padding: 12px 20px; border-radius: 4px; opacity: 0; transition: opacity 0.3s; max-width: 360px; }
+    .toast.show { opacity: 0.95; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎬 LED Asset Review</h1>
+    <div>
+      <button id="repick-btn" style="display:none;margin-right:12px;padding:4px 12px;font-size:13px;background:white;border:1px solid #dadce0;border-radius:4px;cursor:pointer;">🔄 换目录</button>
+      <span id="cap-badge" class="badge">检测中…</span>
+    </div>
+  </div>
+  <div class="main" id="main">
+    <!-- boot / drop zone / cards rendered here -->
+  </div>
+  <div id="toast" class="toast"></div>
+
+  <!-- 规则数据(原 docs/SKILL.md)内联在 <script type="text/markdown"> 里。
+       浏览器不执行它,只把它当文本节点塞进 DOM。
+       运行时从 document.getElementById('skill-rules').textContent 读取。 -->
+  <script type="text/markdown" id="skill-rules">
+---
+name: led-asset-naming
+description: Use when 命名爱奇艺 LED 大屏动态背景墙数字资产 — 包括最终视频成品、摄影机实拍原始素材文件夹、DCC / 虚幻引擎 / 调色制作工程文件夹、制作中素材文件夹与序列帧；或需要核对场景气氛时间 / 天气 / 制作方式 / 制作工序代码字典，或确认提交文件夹层级。适用于参与 iQiyi 影视项目 LED 虚拟制片资产交付时。
+---
+
+# LED 大屏动态背景墙资产命名规范
+
+## Overview
+爱奇艺数字资产标准 V2（2022/12）对 LED 大屏播放视频与配套工程素材的命名做了硬性约束。所有交付物的文件名 / 文件夹名都遵循同一根模式：
+
+```
+场景名称_序号_场景气氛时间_场景天气状态_<阶段标识>_<版本号>
+```
+
+「阶段标识」按交付物类型从 4 套词典里选；版本号格式恒为 `V01 / V02 / …`。
+
+## When to use
+- 给 LED 大屏播放视频成品命名（`*.mov / *.mp4` 等输出）
+- 给 DCC 合成 / DCC 创作 / 虚幻引擎 / 调色四类工程文件夹命名
+- 给摄影机原始拍摄素材文件夹命名
+- 给制作中间产物（合成 / DCC / 调色的素材文件夹与序列帧）命名
+- 整理一级 / 二级文件夹层级以便向爱奇艺数字资产库提交
+- 需要查「中午 / 黄昏 / 阴天 / 实拍合成」等中文术语对应的英文缩写
+
+**Don't use when**: 命名爱奇艺其它品类资产（电影、动漫、模型、IP 衍生品），或非爱奇艺 LED 项目 —— 它们各有自己的规范。
+
+## Quick Reference — 五种命名方式
+
+| 交付物 | 模式 | 样例（场景：理想之城 LXZC） |
+|---|---|---|
+| 最终视频成品 | `场景_序号_气氛时间_天气_制作方式_版本` | `LXZC_1_NT_N_RS_V01` |
+| DCC / UE / 调色 工程文件夹 | `场景_序号_气氛时间_天气_制作工序_版本` | `LXZC_1_NT_N_CP_V01` |
+| 摄影机原始素材文件夹 | `场景_序号_气氛时间_天气_M` | `LXZC_1_NT_N_M` |
+| 制作中素材文件夹 | `场景_序号_气氛时间_天气_制作工序_版本` | `LXZC_1_NT_N_CP_V01` |
+| 序列帧文件 | `场景_序号_气氛时间_天气_制作工序_版本_序列帧号.ext` | `LXZC_1_NT_N_CP_V01_00502.dpx` |
+
+分隔符恒为半角下划线 `_`，扩展名只允许 `.dpx / .exr / .tiff`（序列帧）。
+
+### 字段 1：场景名称
+中文片名拼音首字母缩写、**大写**。例：`理想之城 → LXZC`。
+
+### 字段 2：镜头序号
+- 同一场景类型里的第几个镜头。仅一个镜头时 = `1`。
+- **车拍镜头**特殊：由顺时针 5 块屏组成，前/右/后/左/上 = `F/R/B/L/T`，编号 `101-F、102-R、103-B、104-L、105-T`。
+
+```
+理想之城 / 镜头 1 / 夜晚 / 正常天气 / 全实拍 / 第一版 / 车拍
+01 前：LXZC_101-F_NT_N_RS_V01
+02 右：LXZC_102-R_NT_N_RS_V01
+03 后：LXZC_103-B_NT_N_RS_V01
+04 左：LXZC_104-L_NT_N_RS_V01
+05 上：LXZC_105-T_NT_N_RS_V01
+```
+
+### 字段 3：场景气氛时间
+| 中文 | 代码 |
+|---|---|
+| 日出前 | `BSR` — Before Sunrise |
+| 日出 | `SR` — Sunrise |
+| 早晨 | `MO` — Morning |
+| 上午 | `FN` — Forenoon |
+| 中午 | `Nn` — Noon ⚠ 原文首字母小写 |
+| 下午 | `AN` — Afternoon |
+| 黄昏 | `NF` — Nightfall |
+| 日落 | `ST` — Sunset |
+| 夜晚 | `NT` — Night |
+| 深夜 | `LN` — Late_at_Night |
+| 黄昏转夜晚 | `NF-NT` — Nightfall-to-Night |
+| 夜晚转日出 | `NT-SR` — Night-to-Sunrise |
+| 长时间延时拍摄 | `TL` — TimeLapse |
+| 黄昏转夜晚延时拍摄 | `NF-NT-TL` — Nightfall-to-Night-Timelapse |
+| 夜晚转日出延时拍摄 | `NT-SR-TL` — Night-to-Sunrise-Timelapse |
+
+### 字段 4：场景天气状态
+无特殊天气时一律用 `N`。
+
+| 中文 | 代码 |
+|---|---|
+| 正常天气 | `N` — Normal |
+| 下雨 | `R` — Rain |
+| 下雪 | `S` — Snow |
+| 阴天 | `CS` — Cloudy_Sky |
+| 刮风 | `W` — Windy |
+| 雾天 | `F` — Fog |
+
+### 字段 5a：制作方式描述（用于最终视频成品）
+| 中文 | 代码 |
+|---|---|
+| 全实拍场景 | `RS` — RealShot |
+| 实拍 + CG 视效合成 | `RVC` — RealShot/VFX_Compositing |
+| 全 CG 视效（视频类 / 实时虚拟制作类） | `VE` — VFX/Engine |
+
+### 字段 5b：制作工序描述（用于工程与中间素材）
+| 中文 | 工程代码 | 素材代码 |
+|---|---|---|
+| 合成 | `CP` — Compositing | `CPM` — Compositing_Material |
+| DCC 创作 | `DC` — DCCsoft_Creation | `DCM` — DCCsoft_Creation_Material |
+| 虚幻引擎 | `UE` — Unreal_Engine | — |
+| 调色 | `CG` — Colorgrading | `CGM` — Colorgrading_Material |
+| 摄影机原始 | — | `M` — Material |
+
+⚠ 注意 `CG` 在本规范中 **专指 Colorgrading（调色）**，并非 Computer Graphics。CG 视效在最终视频成品里走字段 5a 的 `VE`。
+
+### 字段 6：版本号
+同一对象不同版本：`V01 / V02 / V03 / …`，恒为两位数，前缀 `V` 大写。
+
+## 文件夹层级规范
+
+一级文件夹 **= 视频内容名称（即字段 1 的场景中文名或对应英文，遵照项目约定）**。
+
+二级文件夹按场景类型分三套：
+
+### A. 全实景拍摄场景
+```
+<视频内容名称>/
+├── LXZC_1_NT_N_M               # 摄影机实拍原始素材
+├── LXZC_1_NT_N_CP_V01          # DCC 软件合成工程
+├── LXZC_1_NT_N_CPM_V01         # DCC 软件素材（合成中间素材）
+├── LXZC_1_NT_N_CG_V01          # 调色软件制作工程
+└── LXZC_1_NT_N_RS_V01.mov      # 完成制作视频内容
+```
+
+### B. 实拍 + CG 视效合成场景
+```
+<视频内容名称>/
+├── LXZC_1_NT_N_M               # 摄影机实拍原始素材
+├── LXZC_1_NT_N_DC_V01          # DCC 内容制作工程
+├── LXZC_1_NT_N_DCM_V01         # DCC 制作内容素材
+├── LXZC_1_NT_N_CP_V01          # DCC 合成工程
+├── LXZC_1_NT_N_CPM_V01         # DCC 合成素材
+├── LXZC_1_NT_N_CG_V01          # 调色软件制作工程
+└── LXZC_1_NT_N_RVC_V01.mov     # 完成制作视频内容
+```
+
+### C. 全 CG 视效（视频类 / 实时虚拟制作类）
+```
+<视频内容名称>/
+├── LXZC_1_NT_N_DC_V01          # DCC 内容制作工程
+├── LXZC_1_NT_N_DCM_V01         # DCC 制作内容素材
+├── LXZC_1_NT_N_CG_V01          # 调色软件制作工程
+└── LXZC_1_NT_N_VE_V01.mov      # 完成制作视频内容
+# —— 或 ——
+├── LXZC_1_NT_N_UE_V01/         # 虚幻引擎制作工程（含相关制作素材、操作蓝图与插件）
+├── LXZC_1_NT_N_CG_V01
+└── LXZC_1_NT_N_VE_V01.mov
+```
+
+## Common Mistakes
+
+| 错误 | 纠正 |
+|---|---|
+| 用驼峰 / 中划线分隔字段 | 通用规范：字段之间一律 `_`；字段内部允许 `-`（如 `101-F`, `NF-NT-TL`） |
+| 父级目录或文件名里**带半角空格** | **本项目特例**：项目前缀 ⇄ 场景名之间**无任何分隔符**，拼音首字母直接连写；父级目录中文名同样去掉空格 —— 见下方「项目级约定」 |
+| 忘了 `V01` 直接 `_v1` 或省略版本 | 版本号位是**必填**，恒两位数，大写 `V` |
+| 把 CG 视效写成 `CG` | 字段 5a 用 `VE`；`CG` 只代表「调色 Colorgrading」 |
+| 中午写成 `N-Noon` | 原规范是 `Nn-Noon`（首字母小写 n + 第二位小写 n），按原文照抄 |
+| 序列帧扩展名用 `.png / .jpg` | 序列帧只用 `.dpx / .exr / .tiff`（成品截图才用 jpg） |
+| 摄影机原始素材文件夹补版本号 | 摄影机原始素材文件夹**不带版本号**，模式只到 `_M`；且**不可改原始拍摄文件名** |
+| 制作中素材文件夹复用工程文件夹名（都是 `..._CP_V01`） | 原规范允许同名 —— 通过**所在二级目录**区分。如果想避免歧义，可把制作中素材文件夹替换为 `CPM / DCM / CGM` 变体并和团队约定 |
+| 车拍五块屏只编 `1/2/3/4/5` | 车拍必须用 `101-F … 105-T`，组合方向是**顺时针** |
+| 「正常天气」直接省略 | 没特殊天气也要写 `N`，字段不能空 |
+
+## 项目级约定 (Project Override)
+
+⚠ **本节盖过**「Quick Reference」+「Common Mistakes」中的对应条目，**仅适用于本项目**。其它项目按 iQiyi 通用规范走，不要外推。
+
+### 父级目录与项目前缀 — **去空格、直接拼接**
+
+- 父级目录中文名**取消半角空格**：`常州 戚墅街道/` → `常州戚墅街道/`
+- 文件名项目前缀 ⇄ 场景名之间**取消任何分隔符**，拼音首字母**直接连写**：`CZ` + `QSJD` → `CZQSJD`
+- 与父级目录**镜像对齐**（不是镜像空格，是镜像「项目+场景」这个 1:1 结构）
+
+| 父级文件夹 | 场景（→ 场景名） | 项目（→ 前缀） | 子文件名（最终视频成品） |
+|---|---|---|---|
+| `常州戚墅街道/` | 戚墅街道 → `QSJD` | 常州 → `CZ` | `CZQSJD_101-F_FN_N_RS_V01.mov` |
+
+### 规则细则
+
+- **项目前缀 ⇄ 场景名**：**无分隔符**（拼音首字母直接连写 `CZQSJD`）
+- **场景名 ⇄ 镜头序号**：下划线 `_`
+- **镜头序号 ⇄ 气氛时间 ⇄ 天气 ⇄ 制作方式 ⇄ 版本**：全部下划线 `_`
+- **天气**字段必须出现，无特殊天气用 `N`
+- **天气 ⇄ 制作方式**两个字段必须拆开，例 `N_RS`（不要黏成 `NRS`）
+- **禁止空格**：父级目录、子文件名、字段内部都**不允许出现半角空格**；连字符 `-` 只在字段内部使用（`101-F`、`NF-NT-TL`）
+
+### 修正对照
+
+```
+❌  CZ QSJD_101-F_FN_N_RS_V01.mov    错：项目与场景之间有空格（已废止）
+❌  CZ_QSJD_101-F_FN_NRS_V01.mov    错：用了下划线；天气与制作方式黏合
+❌  QSJD_101-F_FN_N_RS_V01.mov      错：砍掉项目前缀，丢失项目层信息
+✅  CZQSJD_101-F_FN_N_RS_V01.mov    对：项目+场景直接拼接，天气与制作方式拆分
+```
+
+### 仅限本项目
+
+若换到 iQiyi 直接交付（无项目层目录），回到通用规范 `QSJD_101-F_FN_N_RS_V01.mov`（砍 `CZ` 前缀；保留 `N_RS` 拆分）。
+
+## 完整对照样例
+
+> **理想之城 · 第 1 镜 · 夜晚 · 正常天气 · 全实拍场景 · 第一版**
+
+| 对象 | 命名 |
+|---|---|
+| 最终视频成品 | `LXZC_1_NT_N_RS_V01.mov` |
+| 摄影机原始素材文件夹 | `LXZC_1_NT_N_M/` |
+| DCC 合成工程文件夹 | `LXZC_1_NT_N_CP_V01/` |
+| DCC 制作素材文件夹 | `LXZC_1_NT_N_DC_V01/` |
+| 调色工程文件夹 | `LXZC_1_NT_N_CG_V01/` |
+| 虚幻引擎工程文件夹 | `LXZC_1_NT_N_UE_V01/` |
+| 合成中间序列帧（第 502 帧） | `LXZC_1_NT_N_CP_V01_00502.dpx` |
+| 制作内容截图（单场景） | `LXZC_1_NT_N_RS_V01.jpg` |
+| 制作内容截图（转换场景三张） | `LXZC_1_NT_N_RS_V01-01.jpg / -02.jpg / -03.jpg` |
+
+### 项目级样例：常州 · 戚墅街道（见「项目级约定」）
+
+> **父级目录：`常州戚墅街道/`（无空格） · 车拍前屏 · 上午 · 正常天气 · 全实拍 · 第一版**
+
+| 对象 | 命名 |
+|---|---|
+| 最终视频成品 | `CZQSJD_101-F_FN_N_RS_V01.mov` |
+| 摄影机原始素材文件夹 | `CZQSJD_101-F_FN_N_M/` |
+| DCC 合成工程文件夹 | `CZQSJD_101-F_FN_N_CP_V01/` |
+| 调色工程文件夹 | `CZQSJD_101-F_FN_N_CG_V01/` |
+| 合成中间序列帧（第 502 帧） | `CZQSJD_101-F_FN_N_CP_V01_00502.dpx` |
+| 制作内容截图 | `CZQSJD_101-F_FN_N_RS_V01.jpg` |
+
+## 制作内容截图规则（命名相关补充）
+- 截图与视频成品同名（多张则后缀 `-01 / -02 / -03`），与视频放在同一文件夹。
+- 格式：JPEG、8bit、RGB 采样；推荐 DaVinci Resolve / Scratch 导出全尺寸。
+- **单一场景**：起始 1 张。**转换场景（日夜 / 夜日 / 延时）**：起始 / 过程 / 结束 共 3 张。
+
+## 提交时的检查项
+- 视频内容硬性要求：分辨率 ≥ 4K-UHD（3840×2160）；高质量编码（ProRes422HQ / ProRes4444 / RAW）；**禁用 MP4 / MKV**。
+- HDR 项目：输出 HDR10 ProRes422 / ProRes422HQ。
+- 文件齐：本规范第 4 节列的素材 / 工程 / 截图缺一不可。
+- 一并提交 **《爱奇艺数字资产 LED 大屏播放素材统计表》** 模板，杀青前一周交 V1.0、杀青后两周交完整资产。
+
+## 来源
+- 文档：`/Users/llm/Downloads/整理规范/LED规范.docx`
+- 标题：《爱奇艺数字资产标准 — LED 大屏动态背景墙资产整理规范 V2》
+- 出版：爱奇艺制片管理中心，2021/12/23 编制，2022/12 发布
+- 本 skill 覆盖范围：第三章「命名规范」+ 第四章「文件夹层级规范」+ 第二章「制作内容截图」「制作格式 / 分辨率 / HDR」相关字段。其它章节（拍摄器材、HDR 流程、场景信息表）请回到原文档查阅。
+  </script>
+
+  <!-- 原 docs/app.js 内联(原 309 行,现展开) -->
+  <script>
+    // LED Asset Review · core logic
+    // Modules exported to window for tests.html + index.html
+
+    const RuleParser = {
+      parse(markdownText) {
+        const timeCodes = this._extractTable(markdownText, '字段 3');
+        const weatherCodes = this._extractTable(markdownText, '字段 4');
+        const methodVideo = this._extractTable(markdownText, '字段 5a');
+        const methodProject = this._extractTable(markdownText, '字段 5b');
+
+        return {
+          timeCodes,
+          weatherCodes,
+          methods: {
+            video: methodVideo,
+            project: methodProject,
+            material: { CPM:'合成', DCM:'DCC素材', CGM:'调色素材', M:'原始素材' }
+          },
+          versionPattern: /^V\d{2}$/,
+          shotPattern: /^(\d{3}-[FRBLT]|\d+)$/,
+          sequencePattern: /^\d{5}$/,
+          extOptions: ['.mov', '.mp4'],
+          seqExtOptions: ['.dpx', '.exr', '.tiff']
+        };
+      },
+
+      _extractTable(md, sectionMarker) {
+        // Find the section starting with "### 字段 N"
+        const sectionRe = new RegExp(`### ${sectionMarker}[\\s\\S]*?(?=\\n### |\\n## |$)`);
+        const sectionMatch = md.match(sectionRe);
+        if (!sectionMatch) return {};
+
+        // Extract rows of form: | 中文 | `CODE` — English |
+        const rowRe = /\|\s*([^|]+?)\s*\|\s*`([^`]+)`\s*—\s*([^|]+?)\s*\|/g;
+        const result = {};
+        let m;
+        while ((m = rowRe.exec(sectionMatch[0])) !== null) {
+          result[m[2].trim()] = m[1].trim();
+        }
+        return result;
+      }
+    };
+
+    const ScanEngine = {
+      validate(filename, parent, rules, options = {}) {
+        const issues = [];
+        const { projectMode = true, checkSeqExt = true } = options;
+
+        // Strip extension
+        const ext = filename.match(/\.[^.]+$/)?.[0] || '';
+        const base = ext ? filename.slice(0, -ext.length) : filename;
+        const isSequenceFrame = /_\d{5}$/.test(base);
+        const isCameraOriginal = base.split('_')[4] === 'M';
+        const expectedSegments = isSequenceFrame ? 7 : (isCameraOriginal ? 5 : 6);
+
+        // Split by underscore
+        const parts = base.split('_');
+        if (parts.length !== expectedSegments) {
+          issues.push({
+            tag: '段数错',
+            detail: `预期 ${expectedSegments} 段（${isSequenceFrame ? '序列帧' : '成品'}），实际 ${parts.length} 段 — 可能是字段黏合，可尝试自动修复`,
+            ruleRef: 'Quick Reference — 五种命名方式'
+          });
+          // Do NOT early-return: per-field validation is meaningless when segment
+          // count is wrong (we don't know where fields start/end), but we leave
+          // it to suggestName() to attempt a glue-split recovery.
+        } else {
+
+        // Field 1: scene code (or project+scene concat)
+        const sceneCode = parts[0];
+        if (!/^[A-Z]{2,10}$/.test(sceneCode)) {
+          issues.push({
+            tag: '场景码非法',
+            detail: `字段 1 "${sceneCode}" 必须是大写字母、长度 2-10`,
+            ruleRef: '字段 1：场景名称'
+          });
+        }
+
+        // Field 2: shot number (regular or car-shot)
+        const shot = parts[1];
+        if (!/^(\d{3}-[FRBLT]|\d+)$/.test(shot)) {
+          issues.push({
+            tag: '镜号格式错',
+            detail: `字段 2 "${shot}" 必须是数字或车拍格式 101-F`,
+            ruleRef: '字段 2：镜头序号'
+          });
+        }
+
+        // Field 3: time code
+        const timeCode = parts[2];
+        if (!rules.timeCodes[timeCode]) {
+          issues.push({
+            tag: '时间码未知',
+            detail: `字段 3 "${timeCode}" 不在时间码字典中`,
+            ruleRef: '字段 3：场景气氛时间'
+          });
+        }
+
+        // Field 4: weather code
+        const weatherCode = parts[3];
+        if (!rules.weatherCodes[weatherCode]) {
+          issues.push({
+            tag: '天气码未知',
+            detail: `字段 4 "${weatherCode}" 不在天气码字典中`,
+            ruleRef: '字段 4：场景天气状态'
+          });
+        }
+
+        // Field 5: method code (try video dict first, fall back to project dict)
+        const methodCode = parts[4];
+        const methodDict = { ...rules.methods.project, ...rules.methods.video };
+        if (!methodDict[methodCode]) {
+          issues.push({
+            tag: '工序码未知',
+            detail: `字段 5 "${methodCode}" 不在制作方式/工序字典中`,
+            ruleRef: '字段 5a/5b：制作方式 / 制作工序'
+          });
+        }
+
+        // Field 6: version (skip for camera-original _M folders)
+        const version = parts[5];
+        const isCameraOriginalMethod = methodCode === 'M';
+        if (!isCameraOriginalMethod && !rules.versionPattern.test(version)) {
+          issues.push({
+            tag: '版本号格式错',
+            detail: `字段 6 "${version}" 必须是 V + 两位数（V01-V99）`,
+            ruleRef: '字段 6：版本号'
+          });
+        }
+
+        // Field 7: sequence frame extension
+        if (isSequenceFrame && checkSeqExt) {
+          if (!rules.seqExtOptions.includes(ext.toLowerCase())) {
+            issues.push({
+              tag: '序列帧扩展名错',
+              detail: `序列帧扩展名 "${ext}" 必须为 ${rules.seqExtOptions.join(' / ')}`,
+              ruleRef: 'Common Mistakes — 序列帧扩展名'
+            });
+          }
+        }
+        }
+
+        // Project override: no half-width spaces in parent dir or filename.
+        // (Always runs, independent of segment count — a space violation is
+        //  a real issue even when the segment count is also wrong.)
+        if (projectMode) {
+          if (parent && parent.includes(' ')) {
+            issues.push({
+              tag: '项目约定违反',
+              detail: `父目录 "${parent}" 包含半角空格，本项目要求无空格`,
+              ruleRef: '项目级约定 — 父级目录与项目前缀'
+            });
+          }
+          if (filename.includes(' ')) {
+            issues.push({
+              tag: '项目约定违反',
+              detail: `文件名 "${filename}" 包含半角空格，本项目要求无空格`,
+              ruleRef: '项目级约定 — 父级目录与项目前缀'
+            });
+          }
+        }
+
+        return { issues };
+      },
+
+      suggestName(filename, issues, rules) {
+        const ext = filename.match(/\.[^.]+$/)?.[0] || '';
+        const base = ext ? filename.slice(0, -ext.length) : filename;
+
+        // Expected segment count (needed to verify the fix actually resolves 段数错)
+        const isSequenceFrame = /_\d{5}$/.test(base);
+        const isCameraOriginal = base.split('_')[4] === 'M';
+        const expectedSegments = isSequenceFrame ? 7 : (isCameraOriginal ? 5 : 6);
+
+        // Fix 1: strip half-width spaces
+        let fixed = base.replace(/ /g, '');
+
+        // Fix 2: NRS-style glue — for any segment that's not a known single code,
+        // try to split it into 2+ known codes via DP. The segment must end on a
+        // method (since segments always end on a method in the spec). If DP
+        // succeeds, replace the segment with the split pieces.
+        const allSingleCodes = new Set([
+          ...Object.keys(rules.timeCodes),
+          ...Object.keys(rules.weatherCodes),
+          ...Object.keys(rules.methods.video),
+          ...Object.keys(rules.methods.project),
+          ...Object.keys(rules.methods.material)
+        ]);
+        const methodCodes = new Set([
+          ...Object.keys(rules.methods.video),
+          ...Object.keys(rules.methods.project),
+          ...Object.keys(rules.methods.material)
+        ]);
+
+        function splitGluedSegment(seg) {
+          // If already a known single code, no split needed
+          if (allSingleCodes.has(seg)) return [seg];
+
+          // Pre-strip: if segment ends with a version-like suffix (v\d{1,2} or
+          // V\d{1,2}), peel it off so the DP only has to handle field 3-5 glue.
+          // Without this, NRSv1 wouldn't parse (v1 isn't a known code).
+          let workSeg = seg;
+          let versionSuffix = null;
+          const versionMatch = seg.match(/^(.+?)([vV]\d{1,2})$/);
+          if (versionMatch) {
+            workSeg = versionMatch[1];
+            versionSuffix = versionMatch[2];
+            if (allSingleCodes.has(workSeg)) {
+              return [workSeg, versionSuffix];
+            }
+          }
+
+          // DP: find the minimum-piece partition where every piece is a known
+          // code. The last piece must be a method (since segments always end on
+          // a method in the spec). Earlier pieces can be T/W or method in any
+          // order (we don't enforce alternation — fields 3-5 can have multiple
+          // T/W values glued together, e.g. FNNRS → FN + N + RS).
+          const n = workSeg.length;
+          const dp = new Array(n + 1).fill(Infinity);
+          const parent = new Array(n + 1).fill(-1);
+          dp[0] = 0;
+
+          for (let i = 1; i <= n; i++) {
+            for (let j = 0; j < i; j++) {
+              if (dp[j] === Infinity) continue;
+              const candidate = workSeg.slice(j, i);
+              if (methodCodes.has(candidate) || allSingleCodes.has(candidate)) {
+                if (dp[j] + 1 < dp[i]) {
+                  dp[i] = dp[j] + 1;
+                  parent[i] = j;
+                }
+              }
+            }
+          }
+
+          if (dp[n] === Infinity) return null;  // no valid partition
+
+          // Reconstruct
+          const pieces = [];
+          let pos = n;
+          while (pos > 0) {
+            const prev = parent[pos];
+            pieces.unshift(workSeg.slice(prev, pos));
+            pos = prev;
+          }
+
+          // Last piece must be a method (segments end on a method)
+          if (!methodCodes.has(pieces[pieces.length - 1])) return null;
+          if (versionSuffix) pieces.push(versionSuffix);
+          return pieces;
+        }
+
+        const parts = fixed.split('_');
+        const recovered = [];
+        for (const seg of parts) {
+          const split = splitGluedSegment(seg);
+          if (split) {
+            recovered.push(...split);
+          } else {
+            recovered.push(seg);
+          }
+        }
+        fixed = recovered.join('_');
+
+        // Fix 3: version — find segment matching ^v\d{1,2}$ and normalize to V + 2 digits
+        const versionIdx = fixed.split('_').length === 7 ? 5 : 5;
+        const partsForVer = fixed.split('_');
+        if (partsForVer[versionIdx] && /^v\d{1,2}$/i.test(partsForVer[versionIdx])) {
+          const num = partsForVer[versionIdx].match(/\d+/)[0].padStart(2, '0');
+          partsForVer[versionIdx] = `V${num}`;
+          fixed = partsForVer.join('_');
+        }
+
+        // Verify the fix actually resolves segment count.
+        // If the result still has wrong count, give up (return null).
+        if (fixed.split('_').length !== expectedSegments) return null;
+
+        return fixed + ext;
+      },
+
+      async walkFileTree(handle, onEntry, parentPath = '') {
+        // Yield to event loop every 100 entries to keep UI responsive
+        let count = 0;
+        for await (const [name, child] of handle.entries()) {
+          const path = parentPath ? `${parentPath}/${name}` : name;
+          onEntry({ name, path, kind: child.kind, handle: child });
+          if (child.kind === 'directory') {
+            await this.walkFileTree(child, onEntry, path);
+          }
+          count++;
+          if (count % 100 === 0) {
+            await new Promise(r => setTimeout(r, 0));
+          }
+        }
+      }
+    };
+
+    const CapabilityDetector = {
+      detect() {
+        return {
+          rename: typeof window.showDirectoryPicker === 'function',
+          copy: typeof navigator.clipboard?.writeText === 'function'
+        };
+      }
+    };
+
+    window.RuleParser = RuleParser;
+    window.ScanEngine = ScanEngine;
+    window.CapabilityDetector = CapabilityDetector;
+  </script>
+
+  <!-- App controller (原 index.html 内联块) -->
+  <script>
+    const App = {
+      state: { phase: 'boot', capability: null, rules: null, violations: [], currentIndex: 0, skippedTypes: new Set(), history: [] },
+
+      async boot() {
+        // Capability detection
+        const cap = CapabilityDetector.detect();
+        this.state.capability = cap.rename ? 'rename' : 'copy-only';
+        const badge = document.getElementById('cap-badge');
+        badge.textContent = cap.rename ? '✅ 实测改名' : '📋 复制改名';
+        badge.className = 'badge ' + (cap.rename ? 'badge-rename' : 'badge-copy');
+
+        // 读取内联的 SKILL.md 规则数据(单文件发行版 — 数据嵌在 <script id="skill-rules"> 里)
+        try {
+          const mdEl = document.getElementById('skill-rules');
+          if (!mdEl || !mdEl.textContent.trim()) {
+            throw new Error('内置规则数据缺失(本文件可能损坏)');
+          }
+          const md = mdEl.textContent;
+          this.state.rules = RuleParser.parse(md);
+          this.showDropZone();
+        } catch (e) {
+          this.showBootError('加载规则失败：' + e.message);
+        }
+
+        // Wire the repick button once. It only becomes visible after a
+        // directory is scanned (see runValidation). Clicking calls
+        // repickDirectory() which clears root + state and re-picks.
+        document.getElementById('repick-btn').addEventListener('click', () => this.repickDirectory());
+      },
+
+      showBootError(msg) {
+        document.getElementById('main').innerHTML = `
+          <div class="boot-error">
+            <h2>❌ 启动失败</h2>
+            <p>${msg}</p>
+            <p>本文件是自包含单文件版本,规则数据应已内联。<a href="javascript:location.reload()">刷新页面</a>重试。</p>
+          </div>`;
+      },
+
+      showDropZone() {
+        const cap = this.state.capability;
+        const hint = cap === 'rename'
+          ? '拖入文件夹后，违规文件可在浏览器内直接改名'
+          : '拖入文件夹后，违规文件名复制到剪贴板，Finder/Explorer 改名';
+        document.getElementById('main').innerHTML = `
+          <div class="toggles" style="margin-bottom:16px;background:white;padding:12px 16px;border-radius:4px;border:1px solid #e0e0e0;">
+            <label style="margin-right:20px;"><input type="checkbox" id="tog-project" checked> 启用项目级约定（iQiyi 内部项目）</label>
+            <label><input type="checkbox" id="tog-seqext" checked> 校验序列帧扩展名</label>
+          </div>
+          <div class="drop-zone" id="drop">
+            <h2>📁 拖入文件夹开始审核</h2>
+            <p>${hint}</p>
+            <p style="margin-top:16px;"><button id="pick-btn">或点击选择文件夹</button></p>
+          </div>`;
+
+        const drop = document.getElementById('drop');
+        drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+        drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+        drop.addEventListener('drop', e => {
+          e.preventDefault();
+          drop.classList.remove('dragover');
+          this.handleDrop(e.dataTransfer.items);
+        });
+        document.getElementById('pick-btn').addEventListener('click', () => this.handlePicker());
+      },
+
+      async handleDrop(items) {
+        for (const item of items) {
+          if (item.kind !== 'file') continue;
+          const handle = await item.getAsFileSystemHandle();
+          if (handle?.kind === 'directory') {
+            await this.scanAndReview(handle);
+            return;
+          }
+        }
+        this.toast('请拖入文件夹，不要拖入单个文件');
+      },
+
+      async handlePicker() {
+        if (!window.showDirectoryPicker) {
+          this.toast('当前浏览器不支持选目录，请用拖入');
+          return;
+        }
+        try {
+          const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          await this.scanAndReview(handle);
+        } catch (e) {
+          if (e.name !== 'AbortError') this.toast('选目录失败：' + e.message);
+        }
+      },
+
+      async scanAndReview(dirHandle) {
+        this._dirHandle = dirHandle;
+        this.state.phase = 'scanning';
+        const entries = [];
+        await ScanEngine.walkFileTree(dirHandle, entry => {
+          if (entry.kind === 'file') {
+            // pathSegments: ['sub1', 'sub2'] — directory chain from root
+            // (excluded) to file's parent (excluded). [] = root. Store as
+            // strings, NOT handles — handles from entries() are bound to
+            // a one-shot iteration snapshot and go stale within seconds
+            // ("state cached in interface object changed"). Re-walking
+            // from _dirHandle via resolveParentHandle() gives a live
+            // handle every time.
+            const pathSegments = entry.path.includes('/')
+              ? entry.path.slice(0, entry.path.lastIndexOf('/')).split('/')
+              : [];
+            entries.push({
+              name: entry.name,
+              path: entry.path,
+              handle: entry.handle,
+              parent: dirHandle.name,
+              pathSegments
+            });
+          }
+        });
+        this.runValidation(entries);
+      },
+
+      runValidation(entries) {
+        const projectMode = document.getElementById('tog-project')?.checked ?? true;
+        const checkSeqExt = document.getElementById('tog-seqext')?.checked ?? true;
+        const violations = [];
+        for (const entry of entries) {
+          const { issues } = ScanEngine.validate(entry.name, entry.parent, this.state.rules, { projectMode, checkSeqExt });
+          if (issues.length > 0) {
+            // validate() only reports issues; the actual fix is computed by
+            // suggestName(). Without this call, the UI would always show
+            // "无法自动重建" for every card.
+            const suggestedName = ScanEngine.suggestName(entry.name, issues, this.state.rules);
+            violations.push({ file: entry, parent: entry.parent, issues, suggestedName, status: 'pending' });
+          }
+        }
+        this.state.violations = violations;
+        this.state.phase = 'reviewing';
+        if (violations.length === 0) {
+          this.renderAllClean();
+        } else {
+          this.renderCurrentCard();
+        }
+        // Show the repick button — only useful after a directory is loaded
+        document.getElementById('repick-btn').style.display = 'inline-block';
+      },
+
+      renderAllClean() {
+        document.getElementById('main').innerHTML = `
+          <div style="text-align:center;padding:60px 20px;">
+            <h1 style="font-size:48px;color:#0d8043;">✅</h1>
+            <h2>全部合规</h2>
+            <p>扫描完成，未发现违规命名。</p>
+            <button onclick="location.reload()">再来一次</button>
+          </div>`;
+      },
+
+      renderCurrentCard() {
+        const v = this.state.violations[this.state.currentIndex];
+        if (!v) {
+          this.renderDone();
+          return;
+        }
+        const cap = this.state.capability;
+        const mainAction = cap === 'rename'
+          ? `<button id="act-rename" style="background:#1a73e8;color:white;">改名</button>`
+          : `<button id="act-copy" style="background:#1a73e8;color:white;">复制建议名</button>`;
+
+        const issuesHtml = v.issues.map(i => `
+          <div class="issue">
+            <span class="tag">${i.tag}</span>
+            <span class="detail">${i.detail}</span>
+            <details><summary>📖 规则原文</summary><pre>${i.ruleRef}</pre></details>
+          </div>`).join('');
+
+        document.getElementById('main').innerHTML = `
+          <div class="card">
+            <div class="card-header">
+              <span class="counter">❌ 违规 ${this.state.currentIndex + 1} / ${this.state.violations.length}</span>
+              <span class="path">📁 ${v.parent}</span>
+            </div>
+            <div class="field">
+              <label>原文件名</label>
+              <div class="filename original">${v.file.name}</div>
+            </div>
+            <div class="field">
+              <label>建议改为</label>
+              <div class="filename-row">
+                <div class="filename suggested">${v.suggestedName || '<em>无法自动重建</em>'}</div>
+                <button class="copy-btn" id="inline-copy" ${!v.suggestedName ? 'disabled' : ''}>📋 复制</button>
+              </div>
+            </div>
+            <div class="issues">${issuesHtml}</div>
+            <div class="actions">
+              <button id="act-skip">跳过</button>
+              <button id="act-skip-type">跳过此类</button>
+              <button id="act-prev" ${this.state.currentIndex === 0 ? 'disabled' : ''}>上一条</button>
+              ${mainAction}
+            </div>
+            <div style="margin-top:16px;text-align:center;">
+              <button id="act-shell" style="background:none;border:none;color:#5f6368;font-size:12px;">📥 生成 rename.sh 兜底</button>
+            </div>
+          </div>
+          <style>
+            .card { background: white; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+            .counter { background: #fce8e6; color: #d93025; padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: bold; }
+            .path { color: #5f6368; font-size: 13px; }
+            .field { margin-bottom: 14px; }
+            .field label { font-size: 12px; color: #5f6368; }
+            .filename { font-family: 'SF Mono', Monaco, monospace; padding: 8px 12px; border-radius: 4px; margin-top: 4px; }
+            .filename.original { background: #fce8e6; }
+            .filename.suggested { background: #e6f4ea; flex: 1; }
+            .filename-row { display: flex; gap: 8px; align-items: stretch; margin-top: 4px; }
+            .copy-btn { padding: 4px 12px; }
+            .issues { margin: 16px 0; padding: 12px; background: #fff8e1; border-radius: 4px; }
+            .issue { margin-bottom: 8px; }
+            .issue .tag { background: #d93025; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px; margin-right: 8px; }
+            .issue pre { background: white; padding: 8px; font-size: 12px; margin-top: 4px; }
+            .actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+            .actions button { padding: 8px 16px; border: 1px solid #dadce0; background: white; border-radius: 4px; cursor: pointer; }
+            .actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+          </style>`;
+
+        // Wire up buttons
+        document.getElementById('inline-copy')?.addEventListener('click', () => this.copySuggested(v));
+        document.getElementById('act-rename')?.addEventListener('click', () => this.doRename(v));
+        document.getElementById('act-copy')?.addEventListener('click', () => this.copySuggested(v));
+        document.getElementById('act-skip').addEventListener('click', () => this.skip(v));
+        document.getElementById('act-skip-type').addEventListener('click', () => this.skipType(v));
+        document.getElementById('act-prev')?.addEventListener('click', () => this.prev());
+        document.getElementById('act-shell').addEventListener('click', () => this.generateShell());
+      },
+
+      copySuggested(v) {
+        if (!v.suggestedName) { this.toast('无法复制：无建议名'); return; }
+        navigator.clipboard.writeText(v.suggestedName).then(
+          () => this.toast('已复制建议名到剪贴板'),
+          e => this.toast('复制失败：' + e.message)
+        );
+      },
+
+      async doRename(v) {
+        if (!this._dirHandle) { this.toast('内部错误：未记录目录句柄'); return; }
+        if (!v.suggestedName) { this.toast('无法改名：无建议名'); return; }
+
+        // No-op: suggested name matches original — avoid an unnecessary rename
+        // (some browsers throw when move() is called with the same name)
+        if (v.suggestedName === v.file.name) {
+          v.status = 'renamed';
+          this.state.history.push({ type: 'rename', index: this.state.currentIndex });
+          this.state.currentIndex++;
+          this.advancePastSkipped();
+          this.renderCurrentCard();
+          return;
+        }
+
+        // Re-resolve a fresh parent handle NOW. Never trust anything from
+        // scan time — see resolveParentHandle() for why.
+        let parentHandle;
+        try {
+          parentHandle = await this.resolveParentHandle(v.file.pathSegments);
+        } catch (e) {
+          console.error('resolveParent failed:', e, { file: v.file.name, pathSegments: v.file.pathSegments, stack: e.stack });
+          this.toast('无法定位父目录：' + e.message);
+          return;
+        }
+
+        // Permission gate. Drag-drop in Chrome returns a handle with READ
+        // permission by default — not write. showDirectoryPicker() with
+        // {mode:'readwrite'} explicitly grants write. If the user dragged
+        // the directory in, we have to ask for write permission on the
+        // live parent handle before any mutation, or Chrome throws
+        // NoModificationAllowedError. On macOS this pops a native
+        // permission prompt.
+        try {
+          if (typeof parentHandle.queryPermission === 'function') {
+            let perm = await parentHandle.queryPermission({ mode: 'readwrite' });
+            if (perm !== 'granted') {
+              perm = await parentHandle.requestPermission({ mode: 'readwrite' });
+            }
+            if (perm !== 'granted') {
+              this.toast('需要写权限才能改名，请在弹窗中允许');
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('permission check failed:', e);
+          // Continue anyway — some Chromium variants lack queryPermission
+        }
+
+        // Re-resolve a fresh file handle from the live parent.
+        let liveFileHandle;
+        try {
+          liveFileHandle = await parentHandle.getFileHandle(v.file.name, { create: false });
+        } catch (e) {
+          console.error('re-resolve file failed:', e, { file: v.file.name, parent: v.file.parent });
+          this.toast('文件已不存在或不可访问：' + v.file.name);
+          return;
+        }
+
+        try {
+          // Prefer move() if available (Chrome 110+). On most APFS / boot
+          // disk cases this is fast and works. But on non-APFS volumes
+          // (exFAT, SMB/NFS mounts, external drives), Chrome's FSA
+          // snapshot for move() can be invalidated aggressively, throwing
+          // InvalidStateError. Fall back to copy+remove in that case —
+          // it uses a different FSA path (getFile → createWritable →
+          // removeEntry) that isn't subject to the same snapshot check.
+          if (typeof liveFileHandle.move === 'function') {
+            try {
+              await liveFileHandle.move(v.suggestedName);
+            } catch (moveErr) {
+              console.warn('move() failed, falling back to copy+remove:', moveErr.message, { file: v.file.name });
+              await this._copyAndRemove(parentHandle, liveFileHandle, v.file.name, v.suggestedName);
+            }
+          } else {
+            // Older browsers without move() at all — copy+remove is the only path.
+            await this._copyAndRemove(parentHandle, liveFileHandle, v.file.name, v.suggestedName);
+          }
+          v.status = 'renamed';
+          this.state.history.push({ type: 'rename', index: this.state.currentIndex });
+          this.state.currentIndex++;
+          this.advancePastSkipped();
+          this.renderCurrentCard();
+        } catch (e) {
+          console.error('rename failed:', e, { file: v.file.name, to: v.suggestedName, pathSegments: v.file.pathSegments, stack: e.stack });
+          this.toast('改名失败：' + e.message + '（可改用 📥 生成 rename.sh 兜底）');
+        }
+      },
+
+      // Copy file content to a new name, then remove the old. Used as a
+      // fallback when move() throws InvalidStateError. Slower than move()
+      // (reads + writes file bytes) but works on more file system types.
+      async _copyAndRemove(parentHandle, oldFileHandle, oldName, newName) {
+        const oldFile = await oldFileHandle.getFile();
+        const newHandle = await parentHandle.getFileHandle(newName, { create: true });
+        const writable = await newHandle.createWritable();
+        await writable.write(oldFile);
+        await writable.close();
+        await parentHandle.removeEntry(oldName);
+      },
+
+      skip(v) {
+        v.status = 'skipped';
+        this.state.history.push({ type: 'skip', index: this.state.currentIndex });
+        this.state.currentIndex++;
+        this.advancePastSkipped();
+        this.renderCurrentCard();
+      },
+
+      skipType(v) {
+        for (const issue of v.issues) this.state.skippedTypes.add(issue.tag);
+        v.status = 'skipped';
+        this.state.history.push({ type: 'skip-type', index: this.state.currentIndex });
+        this.advancePastSkipped();
+        this.renderCurrentCard();
+      },
+
+      advancePastSkipped() {
+        while (this.state.currentIndex < this.state.violations.length) {
+          const next = this.state.violations[this.state.currentIndex];
+          if (next.status !== 'pending' || next.issues.every(i => this.state.skippedTypes.has(i.tag))) {
+            if (next.status === 'pending') next.status = 'skipped';
+            this.state.currentIndex++;
+          } else {
+            break;
+          }
+        }
+      },
+
+      prev() {
+        if (this.state.history.length === 0) return;
+        const last = this.state.history.pop();
+        this.state.violations[last.index].status = 'pending';
+        this.state.currentIndex = last.index;
+        this.renderCurrentCard();
+      },
+
+      generateShell() {
+        const pending = this.state.violations.filter(v => v.status === 'pending' && v.suggestedName);
+        if (pending.length === 0) { this.toast('无待处理违规'); return; }
+        const lines = ['#!/usr/bin/env bash', 'set -e', ''];
+        for (const v of pending) {
+          // Use full path (subdir/file.ext) so mv works in any subdirectory.
+          // Replace just the basename for the new name, keep the dir prefix.
+          const dir = v.file.path.includes('/') ? v.file.path.slice(0, v.file.path.lastIndexOf('/') + 1) : '';
+          const oldQ = `'${v.file.path.replace(/'/g, "'\\''")}'`;
+          const newQ = `'${(dir + v.suggestedName).replace(/'/g, "'\\''")}'`;
+          lines.push(`mv -- ${oldQ} ${newQ}`);
+        }
+        const content = lines.join('\n') + '\n';
+        const blob = new Blob([content], { type: 'text/x-shellscript' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'rename.sh';
+        a.click();
+        URL.revokeObjectURL(url);
+        this.toast(`已下载 rename.sh（${pending.length} 个改名）`);
+      },
+
+      renderDone() {
+        const renamed = this.state.violations.filter(v => v.status === 'renamed').length;
+        const skipped = this.state.violations.filter(v => v.status === 'skipped').length;
+        const skippedTypesCount = this.state.skippedTypes.size;
+        document.getElementById('main').innerHTML = `
+          <div style="text-align:center;padding:60px 20px;">
+            <h1 style="font-size:48px;">🎉</h1>
+            <h2>审核完成</h2>
+            <p>改名 <strong>${renamed}</strong> · 跳过 <strong>${skipped}</strong> · 跳过类型 <strong>${skippedTypesCount}</strong> 种</p>
+            <button onclick="location.reload()" style="margin-top:20px;padding:8px 24px;">重新开始</button>
+          </div>`;
+      },
+
+      toast(msg, ms = 3000) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), ms);
+      },
+
+      // Walk pathSegments from the live root handle (_dirHandle) to get
+      // a fresh parent dir handle. This is the only way to defeat FSA's
+      // "state cached in interface object changed" error: handles from
+      // entries() at scan time are bound to a one-shot iteration
+      // snapshot and go stale within seconds. The root handle from
+      // showDirectoryPicker / getAsFileSystemHandle stays live for the
+      // session, so we walk down through it fresh on every operation.
+      async resolveParentHandle(pathSegments) {
+        let cur = this._dirHandle;
+        for (const seg of pathSegments) {
+          cur = await cur.getDirectoryHandle(seg, { create: false });
+        }
+        return cur;
+      },
+
+      // Discard the current root handle and re-pick a directory. Use this
+      // when the user switches to a different disk/volume in the same
+      // session — the drag-drop FSA handle from the old disk may have
+      // its root snapshot invalidated by Chrome, and re-walking from it
+      // can't recover (the root itself is the problem). A fresh picker
+      // gets a brand-new root handle bound to the current state.
+      async repickDirectory() {
+        this._dirHandle = null;
+        this.state.violations = [];
+        this.state.currentIndex = 0;
+        this.state.history = [];
+        this.state.skippedTypes = new Set();
+        this.state.phase = 'boot';
+        document.getElementById('repick-btn').style.display = 'none';
+        await this.handlePicker();
+        // handlePicker() on success calls scanAndReview() which calls
+        // runValidation() which sets phase=reviewing and shows the button.
+      }
+    };
+
+    App.boot();
+  </script>
+</body>
+</html>

@@ -1,8 +1,14 @@
 # LED Asset Review
 
+> ⚠️ **Test Version** (`v0.1-test`) — 功能集已自检通过,**正式版前请勿用于对外交付**。
+> 行为与生产规范有差异时以本仓库 `docs/SKILL.md` 为准。
+
 iQiyi LED 大屏动态背景墙资产命名审核 Web App —— 把 `SKILL.md` 包装成可拖即用、Card Stack 引导式单页 web app。
 
 ## 功能
+
+> 📦 **要给同事 / 团队传这工具用？** 看 [`dist/`](./dist/) —— 单文件版本（49KB），双击就能跑，不用起 server。
+> 改写相关的坑（NTFS / FUSE）在 [`dist/KNOWN-ISSUES.md`](./dist/KNOWN-ISSUES.md)。
 
 - 📁 拖入文件夹，自动按 6 字段规则扫描
 - 🎴 一张张弹违规卡（Card Stack），可视化原名 / 建议名 / 违规原因
@@ -79,4 +85,4 @@ cd docs/ && python3 -m http.server 8765
 
 ## License
 
-MIT
+MIT (见 [`dist/LICENSE`](./dist/LICENSE) 或根目录 `LICENSE`)
