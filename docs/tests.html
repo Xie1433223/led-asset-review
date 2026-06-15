@@ -312,25 +312,34 @@
     // a real network round-trip. Real integration test (against the actual
     // fixture.xlsx) is added at the bottom of this block, gated on the
     // real libs being loaded by the page.
+    // 16-col iQiyi template (full). Substring match is permissive: header
+    // text is fuzzy-matched, so adding/removing a column shifts index but
+    // the parser still works as long as required columns exist.
     const iqiyiHeaders = [
       '序号', '文件命名', '场景名称', '拍摄地理名称（素材拍摄位置）',
       '拍摄地理位置（视效合成视频需要拍摄素材位置）\n经纬度', '场景简介', '内景/外景',
       '气氛时间', '天气', '主要出现集数及场次\n（如不清楚可不填）',
       '播放素材截图', '\n视频格式\n建议ProRes422HQ',
-      '原始拍摄素材文件名称', '视频时长', '备注'
+      '原始拍摄素材',  // 是/否 (col 12)
+      '原始拍摄素材文件名称',  // file name (col 13)
+      '视频时长', '备注'
     ];
     const iqiyiGrid = [
       ['LED大屏播放素材统计表'],
       ['填写日期：', '2026-06-15'],
       iqiyiHeaders,
       [1, '1-1Apple ProRes 422 HQ 4500x1400 05m00s_000001', '青梧镇街道', '乐山市王坎',
-       '29.63,103.77', '街道周围环境', '外景', '上午', '晴天', null, null, '是', '否', null, null],
+       '29.63,103.77', '街道周围环境', '外景', '上午', '晴天', null, null, '是', '否',
+       '1-1M_Raw_Cam_4500x1400_000001', null, null],
       [2, '1-2Apple ProRes 422 HQ 4500x1400 05m00s_000002', '青梧镇街道', '乐山市王坎',
-       '29.63,103.77', '街道周围环境', '外景', '中午', '晴天', null, null, '是', '否', null, null],
+       '29.63,103.77', '街道周围环境', '外景', '中午', '晴天', null, null, '是', '否',
+       '1-2M_Raw_Cam_4500x1400_000002', null, null],
       [3, '1-3Apple ProRes 422 HQ 4500x1400 05m00s_000003', '青梧镇街道', '乐山市王坎',
-       '29.63,103.77', '街道周围环境', '外景', '下午', '阴天', null, null, '是', '否', null, null],
+       '29.63,103.77', '街道周围环境', '外景', '下午', '阴天', null, null, '是', '否',
+       '1-3M_Raw_Cam_4500x1400_000003', null, null],
       [4, '1-4M_Raw_Cam_4500x1400_000001', '青梧镇街道', '乐山市王坎',
-       '29.63,103.77', '街道周围环境', '外景', '上午', '晴天', null, null, '否', '是', null, null],
+       '29.63,103.77', '街道周围环境', '外景', '上午', '晴天', null, null, '否', '是',
+       '1-4M_Raw_Cam_4500x1400_000001', null, null],
       [],  // empty row (sentinel for end of data)
       ['填表人：', '张三']  // footer — should be ignored
     ];
@@ -389,6 +398,18 @@
     xr = XlsxNamer.build({ ...sampleRow, time: '傍晚' }, xRules, { method: 'RS', shotCode: '1' });
     assertEq(xr.name, 'QWZJD_1_NF_N_RS_V01', 'XlsxNamer: 傍晚 (not in spec) → NF fallback');
 
+    // 晚上 (口语) → NT (夜晚)
+    xr = XlsxNamer.build({ ...sampleRow, time: '晚上' }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.name, 'QWZJD_1_NT_N_RS_V01', 'XlsxNamer: 晚上 (colloquial) → NT fallback');
+
+    // 早上 (口语) → MO (早晨)
+    xr = XlsxNamer.build({ ...sampleRow, time: '早上' }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.name, 'QWZJD_1_MO_N_RS_V01', 'XlsxNamer: 早上 (colloquial) → MO fallback');
+
+    // 夜里 (口语) → NT (夜晚)
+    xr = XlsxNamer.build({ ...sampleRow, time: '夜里' }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.name, 'QWZJD_1_NT_N_RS_V01', 'XlsxNamer: 夜里 (colloquial) → NT fallback');
+
     // 摄影机原始素材=是 → _M 模式 (无版本号)
     xr = XlsxNamer.build({ ...sampleRow, isCameraOriginal: true }, xRules, { method: 'RS', shotCode: '1' });
     assertEq(xr.name, 'QWZJD_1_FN_N_M', 'XlsxNamer: 摄影机原始素材 → _M suffix, no version');
@@ -445,6 +466,89 @@
     assertEq(fallbackRows[0]._shotCode, '5', 'computeShotMap: 空 location, parse N-x prefix');
     assertEq(fallbackRows[1]._shotCode, '1', 'computeShotMap: 空 location + 无 prefix → 1');
     assertEq(fallbackRows[1]._shotFallback, true, 'computeShotMap: 落到默认 1 时标 _shotFallback');
+
+    // —— XlsxTableParser: optional column (原始拍摄素材文件名称) ——
+    // 15-col template (no 原始拍摄素材文件名称 column). Parser should NOT
+    // throw, and the optional column should be parsed as ''.
+    const headers15 = iqiyiHeaders.slice(0, 13).concat(['视频时长', '备注']);
+    const grid15 = [
+      ['LED大屏播放素材统计表'],
+      ['填写日期：', '2026-06-15'],
+      headers15,
+      [1, '1-1Apple...', '青梧镇街道', '乐山市王坎',
+       '29.63,103.77', '街道周围环境', '外景', '上午', '晴天', null, null, '是', '否', null, null]
+    ];
+    window.XLSX.utils.sheet_to_json = () => grid15;
+    const parsed15 = XlsxTableParser.parse(new ArrayBuffer(0));
+    assertEq(parsed15.rows.length, 1, 'XlsxTableParser 15-col (optional col missing): parses 1 row');
+    assertEq(parsed15.rows[0].originalMaterialName, '',
+      'XlsxTableParser 15-col: originalMaterialName = "" (optional absent)');
+    assertEq(parsed15.colMap.originalMaterialName, -1,
+      'XlsxTableParser 15-col: colMap index for optional col = -1');
+    // restore 16-col grid for the rest of the block
+    window.XLSX.utils.sheet_to_json = () => iqiyiGrid;
+
+    // —— XlsxNamer.matchRowsToFiles ——
+    // Build a fake directory index (Map<normalizedName, fileEntry[]>).
+    const fileIndex = new Map();
+    fileIndex.set('1-1Apple ProRes 422 HQ 4500x1400 05m00s_000001', [
+      { fullName: '1-1Apple ProRes 422 HQ 4500x1400 05m00s_000001.mov', pathSegments: [] }
+    ]);
+    fileIndex.set('1-4M_Raw_Cam_4500x1400_000001', [
+      { fullName: '1-4M_Raw_Cam_4500x1400_000001.mov', pathSegments: [] }
+    ]);
+
+    // Case A: currentName hit, originalMaterialName also present — first wins
+    const matchA = XlsxNamer.matchRowsToFiles(
+      [{ currentName: '1-1Apple ProRes 422 HQ 4500x1400 05m00s_000001',
+         originalMaterialName: '1-1M_Raw_Cam_4500x1400_000001' }],
+      fileIndex
+    );
+    assertEq(matchA.okCount, 1, 'match A: 1 hit');
+    assertEq(matchA.missCount, 0, 'match A: 0 miss');
+    assertEq(matchA.conflictCount, 0, 'match A: 0 conflict');
+
+    // Case B: currentName MISS, originalMaterialName HIT (fallback)
+    const matchB = XlsxNamer.matchRowsToFiles(
+      [{ currentName: 'no-such.mov', originalMaterialName: '1-4M_Raw_Cam_4500x1400_000001' }],
+      fileIndex
+    );
+    assertEq(matchB.okCount, 1, 'match B: originalMaterialName fallback hit');
+
+    // Case C: total miss
+    const matchC = XlsxNamer.matchRowsToFiles(
+      [{ currentName: 'no-such-1', originalMaterialName: 'no-such-2' }],
+      fileIndex
+    );
+    assertEq(matchC.missCount, 1, 'match C: total miss → missCount = 1');
+    assertEq(matchC.okCount, 0, 'match C: 0 ok');
+
+    // Case D: conflict — two rows claim same file
+    const matchD = XlsxNamer.matchRowsToFiles(
+      [{ currentName: '1-1Apple ProRes 422 HQ 4500x1400 05m00s_000001', originalMaterialName: '' },
+       { currentName: '1-1Apple ProRes 422 HQ 4500x1400 05m00s_000001', originalMaterialName: '' }],
+      fileIndex
+    );
+    assertEq(matchD.okCount, 1, 'match D: conflict → first row wins (1 ok)');
+    assertEq(matchD.conflictCount, 1, 'match D: conflict → 1 conflict');
+
+    // Case E: subdir pathSegments preserved
+    const fileIndex2 = new Map();
+    fileIndex2.set('foo', [{ fullName: 'foo.mov', pathSegments: ['sub1', 'sub2'] }]);
+    const matchE = XlsxNamer.matchRowsToFiles(
+      [{ currentName: 'foo', originalMaterialName: '' }],
+      fileIndex2
+    );
+    assertEq(matchE.okCount, 1, 'match E: subdir lookup hit');
+    assertEq(fileIndex2.get('foo')[0].pathSegments, ['sub1', 'sub2'],
+      'match E: subdir pathSegments retained for re-resolve at execute time');
+
+    // Case F: _normalizeForMatch — extension stripping + case-insensitive
+    assertEq(XlsxNamer._normalizeForMatch('1-1Apple.mov'), '1-1Apple', 'normalize: .mov stripped');
+    assertEq(XlsxNamer._normalizeForMatch('foo.PNG'), 'foo', 'normalize: .PNG stripped (case-insensitive)');
+    assertEq(XlsxNamer._normalizeForMatch('  bar  '), 'bar', 'normalize: whitespace trimmed');
+    assertEq(XlsxNamer._normalizeForMatch('foo.mxf'), 'foo', 'normalize: .mxf stripped (camera raw)');
+    assertEq(XlsxNamer._normalizeForMatch('foo'), 'foo', 'normalize: no ext unchanged');
 
     // —— ScanEngine.walkFileTree (integration with FileSystemFileHandle) ——
     // This test requires a user gesture to open the directory picker, so it

@@ -314,15 +314,20 @@ const XlsxTableParser = {
   // case-sensitive and works on the raw cell text (with newlines / parens
   // left intact, since the iQiyi template has stuff like
   // '\n视频格式\n建议ProRes422HQ').
+  // `required: false` means the column may be missing in older templates —
+  // we tolerate it and just leave the field empty. (Seen in case-07 fixture
+  // which only has 15 cols; the full iQiyi template has 16 incl. 原始拍摄
+  // 素材文件名称.)
   HEADER_KEYS: {
-    serial:        '序号',
-    currentName:   '文件命名',
-    sceneName:     '场景名称',
-    location:      '拍摄地理名称',
-    time:          '气氛时间',
-    weather:       '天气',
-    format:        '视频格式',
-    isCameraOrig:  '原始拍摄素材'
+    serial:              { needle: '序号',                 required: true  },
+    currentName:         { needle: '文件命名',             required: true  },
+    sceneName:           { needle: '场景名称',             required: true  },
+    location:            { needle: '拍摄地理名称',         required: true  },
+    time:                { needle: '气氛时间',             required: true  },
+    weather:             { needle: '天气',                 required: true  },
+    format:              { needle: '视频格式',             required: true  },
+    isCameraOrig:        { needle: '原始拍摄素材',         required: true  },
+    originalMaterialName:{ needle: '原始拍摄素材文件名称', required: false }
   },
 
   parse(arrayBuffer) {
@@ -342,7 +347,7 @@ const XlsxTableParser = {
     let headerRowIdx = -1;
     for (let i = 0; i < grid.length; i++) {
       const c0 = grid[i]?.[0];
-      if (c0 != null && String(c0).trim() === this.HEADER_KEYS.serial) {
+      if (c0 != null && String(c0).trim() === this.HEADER_KEYS.serial.needle) {
         headerRowIdx = i;
         break;
       }
@@ -353,16 +358,22 @@ const XlsxTableParser = {
 
     // Build a column-index map from the header row. Substring match:
     // '拍摄地理名称（素材拍摄位置）' contains '拍摄地理名称' → match.
+    // required:false columns may be missing (older templates) — leave -1.
     const headerRow = grid[headerRowIdx];
     const colMap = {};
-    for (const [key, needle] of Object.entries(this.HEADER_KEYS)) {
+    for (const [key, spec] of Object.entries(this.HEADER_KEYS)) {
+      const needle = spec.needle;
       let found = -1;
       for (let c = 0; c < headerRow.length; c++) {
         const cell = headerRow[c];
         if (cell == null) continue;
         if (String(cell).includes(needle)) { found = c; break; }
       }
-      if (found < 0) throw new Error(`表头缺少列 "${needle}"`);
+      if (found < 0) {
+        if (spec.required) throw new Error(`表头缺少列 "${needle}"`);
+        colMap[key] = -1;  // optional column absent — leave parsed as ''
+        continue;
+      }
       colMap[key] = found;
     }
 
@@ -387,7 +398,10 @@ const XlsxTableParser = {
         time:        row[colMap.time]        != null ? String(row[colMap.time]).trim()        : '',
         weather:     row[colMap.weather]     != null ? String(row[colMap.weather]).trim()     : '',
         format:      row[colMap.format]      != null ? String(row[colMap.format]).trim()      : '',
-        isCameraOriginal: this._truthy(row[colMap.isCameraOrig])
+        isCameraOriginal: this._truthy(row[colMap.isCameraOrig]),
+        originalMaterialName: colMap.originalMaterialName >= 0 && row[colMap.originalMaterialName] != null
+          ? String(row[colMap.originalMaterialName]).trim()
+          : ''
       });
     }
 
@@ -441,10 +455,13 @@ const XlsxNamer = {
     const timeReverseMap = this._reverseMap(rules.timeCodes);
     let timeCode = timeReverseMap[row.time];
     if (!timeCode) {
-      // 傍晚 isn't in SKILL.md — map to 黄昏 (NF) as the closest match.
-      if (row.time === '傍晚') timeCode = 'NF';
-      else if (row.time === '早上') timeCode = 'MO';
-      else if (row.time === '夜里') timeCode = 'NT';
+      // Common colloquial variants that aren't in SKILL.md's official list.
+      // SKILL.md uses formal 早晨/上午/中午/下午/黄昏/日落/夜晚/深夜; users
+      // (esp. iQiyi form fillers) often write colloquial 早上/晚上/傍晚/夜里.
+      if (row.time === '傍晚') timeCode = 'NF';        // → 黄昏 (Nightfall)
+      else if (row.time === '晚上') timeCode = 'NT';   // → 夜晚 (Night)
+      else if (row.time === '夜里') timeCode = 'NT';   // → 夜晚 (Night)
+      else if (row.time === '早上') timeCode = 'MO';   // → 早晨 (Morning)
     }
     if (!timeCode) {
       return { name: null, status: 'err', warnings: [`未知气氛时间 "${row.time}"`] };
@@ -522,6 +539,86 @@ const XlsxNamer = {
       }
     }
     return shotByLocation;
+  },
+
+  // Match xlsx rows to files in the user's directory. Two-column match:
+  //   candidate keys = [normalize(currentName), normalize(originalMaterialName)]
+  // "两列都试" — either column counts, first match wins. The iQiyi template's
+  // 文件命名 column has the playback file name (no extension); the 原始拍摄
+  // 素材文件名称 column has the camera-original file name (no extension).
+  // Real files on disk have extensions (.mov, .png, .mp4) — we strip those
+  // before lookup so xlsx strings (extensionless) match.
+  //
+  // fileIndex: Map<normalizedName, fileEntry[]>  — built by App._buildFileIndex
+  // fileEntry: { fullName, fileHandle, pathSegments } (pathSegments for
+  //            re-resolving the parent at execute time, per existing FSA rules)
+  //
+  // Sets on each row:
+  //   _matchedFile: fileEntry | null
+  //   _matchStatus: 'ok' | 'miss' | 'conflict'
+  //   _matchSource: 'currentName' | 'originalMaterialName' (which col won)
+  // conflict: a file was claimed by ≥2 rows. First row (in xlsx order) wins,
+  //   other rows get _matchStatus='conflict' and _matchedFile=null. This
+  //   mirrors folder-drop's first-claim-wins behavior.
+  matchRowsToFiles(rows, fileIndex) {
+    // Track which file is already claimed by which row, to detect conflicts.
+    const claimedBy = new Map();  // normalizedName → rowIndex
+    let okCount = 0, missCount = 0, conflictCount = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      // Build candidate (name, sourceLabel) pairs. currentName first because
+      // it's the canonical column; originalMaterialName is the fallback.
+      const candidates = [
+        { name: row.currentName,           source: 'currentName' },
+        { name: row.originalMaterialName,  source: 'originalMaterialName' }
+      ].filter(c => c.name && c.name.trim());
+
+      let hit = null;
+      for (const c of candidates) {
+        const key = this._normalizeForMatch(c.name);
+        if (!key) continue;
+        const entry = fileIndex.get(key);
+        if (entry && entry.length > 0) {
+          // If already claimed by an earlier row, mark as conflict (skip).
+          if (claimedBy.has(key)) {
+            conflictCount++;
+            row._matchedFile = null;
+            row._matchStatus = 'conflict';
+            row._matchSource = null;
+            hit = { conflict: true };
+            break;
+          }
+          hit = { entry: entry[0], source: c.source, key };
+          break;
+        }
+      }
+
+      if (!hit) {
+        row._matchedFile = null;
+        row._matchStatus = 'miss';
+        row._matchSource = null;
+        missCount++;
+      } else if (hit.conflict) {
+        // already counted in the loop above; nothing to do
+      } else {
+        row._matchedFile = hit.entry;
+        row._matchStatus = 'ok';
+        row._matchSource = hit.source;
+        claimedBy.set(hit.key, i);
+        okCount++;
+      }
+    }
+    return { okCount, missCount, conflictCount };
+  },
+
+  // Normalize a name for matching: trim, strip a single trailing extension.
+  // We strip ".mov" / ".png" / ".mp4" etc. so xlsx's extensionless strings
+  // match real files. This is a single-segment strip, not a path strip —
+  // xlsx columns shouldn't contain paths, but be defensive.
+  _normalizeForMatch(name) {
+    if (!name) return '';
+    return String(name).trim().replace(/\.(mov|png|mp4|jpg|jpeg|mxf|braw|r3d|ari|exr)$/i, '');
   }
 };
 

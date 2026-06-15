@@ -549,6 +549,17 @@
           this.toast('CDN 加载失败：' + e.message + '（需要联网，或把 xlsx.full.min.js / pinyin-pro 放到 dist/ 旁）', 6000);
           return;
         }
+        // pinyin-pro v3 UMD exposes the namespace as window.pinyinPro
+        // (camelCase), NOT window.pinyin. The build() function uses the
+        // short name, so alias after load. This is a no-op if window.pinyin
+        // already exists (e.g. on a page that loaded pinyin-pro twice).
+        if (typeof window.pinyin === 'undefined' && window.pinyinPro && typeof window.pinyinPro.pinyin === 'function') {
+          window.pinyin = window.pinyinPro.pinyin;
+        }
+        if (typeof window.pinyin === 'undefined') {
+          this.toast('pinyin-pro 加载后仍未暴露 window.pinyin(版本不兼容?),请到 console 看 window.pinyinPro 实际结构', 8000);
+          return;
+        }
         // Read file → ArrayBuffer → parse.
         let buf;
         try {
@@ -586,6 +597,12 @@
           });
           row._suggested = result;
         }
+        // If a directory is already picked, (re-)match rows to files so the
+        // table reflects the current disk state (relevant after a rename
+        // pass — file names just changed).
+        if (s.dirHandle && s.fileIndex) {
+          XlsxNamer.matchRowsToFiles(s.rows, s.fileIndex);
+        }
         this.renderXlsxPreview();
       },
 
@@ -596,8 +613,22 @@
         const warnCount = s.rows.filter(r => r._suggested.status === 'warn').length;
         const errCount = s.rows.filter(r => r._suggested.status === 'err').length;
 
+        // Match stats (only meaningful after a directory is picked).
+        const dirPicked = !!(s.dirHandle && s.fileIndex);
+        const matchOk = dirPicked ? s.rows.filter(r => r._matchStatus === 'ok').length : 0;
+        const matchMiss = dirPicked ? s.rows.filter(r => r._matchStatus === 'miss').length : 0;
+        const matchConflict = dirPicked ? s.rows.filter(r => r._matchStatus === 'conflict').length : 0;
+        const eligibleCount = dirPicked
+          ? s.rows.filter(r => r._matchStatus === 'ok' && r._suggested && r._suggested.status !== 'err' && r._suggested.name).length
+          : 0;
+
         const methodOptions = ['RS', 'RVC', 'VE', 'CP', 'DC', 'UE', 'CG']
           .map(m => `<option value="${m}" ${s.method === m ? 'selected' : ''}>${m}</option>`).join('');
+
+        // Currently-selected directory label (or hint to pick one).
+        const dirLabel = dirPicked
+          ? `<span style="color:#0d8043;">📁 ${this._escapeHtml(s.dirHandle.name)}</span>`
+          : `<span style="color:#5f6368;">未选目录</span>`;
 
         const rowsHtml = s.rows.map(row => {
           const sug = row._suggested;
@@ -608,6 +639,24 @@
             ? `title="${sug.warnings.join(' / ')}"`
             : '';
           const nameColor = sug.status === 'err' ? '#fce8e6' : '#e6f4ea';
+          // Match cell (only when dir picked; otherwise dash).
+          let matchCell = `<td style="padding:8px;border-bottom:1px solid #eee;text-align:center;color:#5f6368;">—</td>`;
+          if (dirPicked) {
+            let matchBadge, matchTitle = '';
+            if (row._matchStatus === 'ok') {
+              matchBadge = '✅';
+              const srcLabel = row._matchSource === 'currentName' ? '文件命名' : '原始素材名';
+              matchTitle = `title="匹配: ${this._escapeHtml(row._matchedFile.fullName)} (源: ${srcLabel})"`;
+            } else if (row._matchStatus === 'miss') {
+              matchBadge = '❌';
+              const candidates = [row.currentName, row.originalMaterialName].filter(n => n && n.trim());
+              matchTitle = `title="未找到匹配文件。xlsx 候选: ${this._escapeHtml(candidates.join(' / ') || '(空)')}"`;
+            } else if (row._matchStatus === 'conflict') {
+              matchBadge = '⚠️';
+              matchTitle = `title="冲突: 多个 xlsx 行引用同一文件"`;
+            }
+            matchCell = `<td style="padding:8px;border-bottom:1px solid #eee;text-align:center;cursor:help;" ${matchTitle}>${matchBadge}</td>`;
+          }
           return `
             <tr ${statusTitle}>
               <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${row.serial}</td>
@@ -617,6 +666,7 @@
               <td style="padding:8px;border-bottom:1px solid #eee;">${this._escapeHtml(row.weather)}</td>
               <td style="padding:8px;border-bottom:1px solid #eee;color:#5f6368;font-family:monospace;font-size:12px;">${this._escapeHtml(row.currentName)}</td>
               <td style="padding:8px;border-bottom:1px solid #eee;background:${nameColor};font-family:monospace;font-weight:bold;">${sug.name ? this._escapeHtml(sug.name) : '<em style="color:#d93025;">无法生成</em>'}</td>
+              ${matchCell}
               <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${statusBadge}</td>
             </tr>`;
         }).join('');
@@ -630,15 +680,25 @@
                   <span style="color:#0d8043;margin-left:8px;">✅ ${okCount}</span>
                   <span style="color:#b06000;margin-left:8px;">⚠️ ${warnCount}</span>
                   <span style="color:#d93025;margin-left:8px;">❌ ${errCount}</span>
+                  ${dirPicked ? `
+                    <span style="margin-left:12px;color:#5f6368;">|</span>
+                    <span style="color:#0d8043;margin-left:8px;">🎯 命中 ${matchOk}</span>
+                    <span style="color:#b06000;margin-left:8px;">⚠️ 冲突 ${matchConflict}</span>
+                    <span style="color:#d93025;margin-left:8px;">❌ 未匹配 ${matchMiss}</span>
+                  ` : ''}
                 </p>
+                <p style="margin:4px 0 0;color:#5f6368;font-size:12px;">${dirLabel}</p>
               </div>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 <label style="font-size:13px;color:#5f6368;">制作方式
                   <select id="xlsx-method" style="margin-left:4px;padding:4px 8px;">${methodOptions}</select>
                 </label>
+                <button id="xlsx-pickdir" style="padding:6px 12px;background:white;border:1px solid #dadce0;border-radius:4px;cursor:pointer;">📁 ${dirPicked ? '重选目录' : '选资产根目录'}</button>
+                <button id="xlsx-execute" ${!dirPicked || eligibleCount === 0 ? 'disabled' : ''} style="padding:6px 16px;background:#1a73e8;color:white;border:none;border-radius:4px;cursor:${!dirPicked || eligibleCount === 0 ? 'not-allowed' : 'pointer'};opacity:${!dirPicked || eligibleCount === 0 ? 0.5 : 1};">⚡ 确认改名 (${eligibleCount})</button>
                 <button id="xlsx-rebuild" style="padding:6px 12px;background:white;border:1px solid #dadce0;border-radius:4px;cursor:pointer;">↻ 重新生成</button>
-                <button id="xlsx-download" style="padding:6px 16px;background:#1a73e8;color:white;border:none;border-radius:4px;cursor:pointer;">📥 下载 rename.sh</button>
+                <button id="xlsx-download" style="padding:6px 16px;background:white;border:1px solid #dadce0;border-radius:4px;cursor:pointer;">📥 下载 rename.sh</button>
                 <button id="xlsx-back" style="padding:6px 12px;background:white;border:1px solid #dadce0;border-radius:4px;cursor:pointer;">↩ 回到拖目录</button>
+                <button id="xlsx-debug" style="padding:6px 12px;background:#fce8e6;border:1px solid #d93025;border-radius:4px;cursor:pointer;color:#d93025;">🐞 调试匹配</button>
               </div>
             </div>
             <div style="overflow-x:auto;">
@@ -652,6 +712,7 @@
                     <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;text-align:left;">天气</th>
                     <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;text-align:left;">当前名</th>
                     <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;text-align:left;">建议名</th>
+                    ${dirPicked ? '<th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;">匹配</th>' : ''}
                     <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;">状态</th>
                   </tr>
                 </thead>
@@ -662,15 +723,89 @@
               <div style="margin-top:16px;padding:12px;background:#fce8e6;border-radius:4px;color:#d93025;font-size:13px;">
                 <strong>❌ ${errCount} 行无法生成</strong> — 改名脚本里不会包含这些行,请手动核对。常见原因:场景名为空、未知气氛时间、未知天气。
               </div>` : ''}
+            ${dirPicked && matchMiss > 0 ? `
+              <div style="margin-top:12px;padding:12px;background:#fff8e1;border-radius:4px;color:#b06000;font-size:13px;">
+                <strong>❌ ${matchMiss} 行未匹配</strong> — 这些 xlsx 行在目录里找不到对应文件,跳过不改名。常见原因:文件名拼写不一致、文件尚未交付、放在子目录外。
+              </div>` : ''}
+            ${dirPicked && matchConflict > 0 ? `
+              <div style="margin-top:12px;padding:12px;background:#fce8e6;border-radius:4px;color:#d93025;font-size:13px;">
+                <strong>⚠️ ${matchConflict} 行冲突</strong> — 多个 xlsx 行引用同一文件(按 xlsx 顺序首条胜出),请检查表里是否有重复的「文件命名」或「原始拍摄素材文件名称」。
+              </div>` : ''}
           </div>`;
 
         document.getElementById('xlsx-method').addEventListener('change', e => {
           s.method = e.target.value;
           this._rebuildAndRenderXlsx();
         });
+        document.getElementById('xlsx-pickdir').addEventListener('click', () => this._pickXlsxDirectory());
+        document.getElementById('xlsx-execute').addEventListener('click', () => this._executeXlsxRename());
         document.getElementById('xlsx-rebuild').addEventListener('click', () => this._rebuildAndRenderXlsx());
         document.getElementById('xlsx-download').addEventListener('click', () => this.generateXlsxShell());
         document.getElementById('xlsx-back').addEventListener('click', () => this.backToDropZone());
+        document.getElementById('xlsx-debug').addEventListener('click', () => this._dumpMatchDiagnostics());
+      },
+
+      // Diagnostic dump — opened from the 🐞 button in xlsx preview. Shows
+      // exactly what the fileIndex contains (sample keys) vs what each xlsx
+      // row normalizes to, so a user can see at a glance whether the miss
+      // is empty fileIndex, encoding drift, or a different naming.
+      _dumpMatchDiagnostics() {
+        const s = this._xlsxState;
+        if (!s) { this.toast('没有 xlsx state'); return; }
+        const lines = [];
+        lines.push('=== fileIndex (扫描到的磁盘文件, normalize 后) ===');
+        if (s.fileIndex) {
+          const keys = Array.from(s.fileIndex.keys());
+          lines.push('总数: ' + keys.length);
+          lines.push('前 30 个 keys:');
+          keys.slice(0, 30).forEach((k, i) => {
+            const entry = s.fileIndex.get(k)[0];
+            const ext = entry && entry.fullName ? entry.fullName.slice(entry.fullName.lastIndexOf('.')) : '?';
+            const path = entry && entry.pathSegments && entry.pathSegments.length ? ' [' + entry.pathSegments.join('/') + ']' : '';
+            lines.push('  ' + (i+1) + '. ' + JSON.stringify(k) + ' (ext=' + ext + ')' + path);
+          });
+        } else {
+          lines.push('(fileIndex 不存在, 你还没选目录)');
+        }
+        lines.push('');
+        lines.push('=== xlsx rows (normalize 后) ===');
+        s.rows.forEach((row, i) => {
+          const cur = XlsxNamer._normalizeForMatch(row.currentName || '');
+          const orig = XlsxNamer._normalizeForMatch(row.originalMaterialName || '');
+          const curHit = s.fileIndex && s.fileIndex.has(cur);
+          const origHit = s.fileIndex && s.fileIndex.has(orig);
+          const sug = row._suggested || {};
+          lines.push('行 ' + (i+1) + ' [serial=' + row.serial + '] match=' + row._matchStatus +
+            (row._matchSource ? ' source=' + row._matchSource : '') +
+            ' | suggestStatus=' + (sug.status || '(none)') +
+            (sug.name ? ' name=' + JSON.stringify(sug.name) : ' name=(空)'));
+          lines.push('  raw currentName:         ' + JSON.stringify(row.currentName));
+          lines.push('  normalize(currentName):  ' + JSON.stringify(cur) + (curHit ? ' ✅命中' : ' ❌miss'));
+          lines.push('  raw originalMaterial:   ' + JSON.stringify(row.originalMaterialName));
+          lines.push('  normalize(orig):         ' + JSON.stringify(orig) + (origHit ? ' ✅命中' : ' ❌miss'));
+          if (sug.warnings && sug.warnings.length) {
+            lines.push('  ⚠️ warnings: ' + JSON.stringify(sug.warnings));
+          }
+          // also dump the fields that build() reads
+          lines.push('  build inputs: sceneName=' + JSON.stringify(row.sceneName) +
+            ' time=' + JSON.stringify(row.time) +
+            ' weather=' + JSON.stringify(row.weather) +
+            ' isCameraOriginal=' + JSON.stringify(row.isCameraOriginal) +
+            ' location=' + JSON.stringify(row.location) +
+            ' shotCode=' + JSON.stringify(row._shotCode));
+        });
+        const text = lines.join('\n');
+        // Always log to console for easy copy
+        console.log(text);
+        // Show in a textarea so user can copy/paste
+        const w = window.open('', '_blank', 'width=820,height=600');
+        if (w) {
+          w.document.write('<title>🐞 匹配诊断</title><pre style="font-family:monospace;font-size:12px;white-space:pre-wrap;padding:16px;">' +
+            this._escapeHtml(text) + '</pre>');
+        } else {
+          // popup blocked — fall back to alert with first 50 lines
+          alert(text.split('\n').slice(0, 50).join('\n') + '\n...(完整内容请看 DevTools console)');
+        }
       },
 
       generateXlsxShell() {
@@ -719,6 +854,183 @@
           .replace(/>/g, '&gt;')
           .replace(/"/g, '&quot;')
           .replace(/'/g, '&#39;');
+      },
+
+      // ===== xlsx + directory mode (real file rename) =====
+      // The xlsx preview builds a list of (suggested name, source name) pairs.
+      // To actually rename, we need a real directory — the user picks one
+      // via showDirectoryPicker (separate from the folder-drop's _dirHandle
+      // since the two flows are independent). Once picked, we build an index
+      // of all files in that tree, match against the xlsx rows, and let the
+      // user click [⚡ 确认改名] to do file.move() for each match.
+
+      async _pickXlsxDirectory() {
+        if (!window.showDirectoryPicker) {
+          this.toast('当前浏览器不支持选目录，请用 Chrome 桌面版');
+          return;
+        }
+        let handle;
+        try {
+          handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        } catch (e) {
+          if (e.name !== 'AbortError') this.toast('选目录失败：' + e.message);
+          return;
+        }
+        // Permission check (readwrite is requested by mode but some Chromium
+        // builds downgrade on drag-drop; picker is more reliable).
+        try {
+          if (typeof handle.requestPermission === 'function') {
+            const perm = await handle.requestPermission({ mode: 'readwrite' });
+            if (perm !== 'granted') { this.toast('需要写权限才能改名'); return; }
+          }
+        } catch (e) { /* continue; some browsers lack this */ }
+        this.toast('扫描目录中…', 1500);
+        let fileIndex;
+        try {
+          fileIndex = await this._buildFileIndex(handle);
+        } catch (e) {
+          this.toast('扫描目录失败：' + e.message);
+          return;
+        }
+        this._xlsxState.dirHandle = handle;
+        this._xlsxState.fileIndex = fileIndex;
+        this._rebuildAndRenderXlsx();
+      },
+
+      // Walk the directory tree and build a Map<normalizedName, fileEntry[]>.
+      // The map is keyed by extensionless name (matching XlsxNamer's
+      // _normalizeForMatch), so the xlsx "文件命名" / "原始拍摄素材文件
+      // 名称" columns (which don't carry extensions) can find real files
+      // (which do). Multiple files with the same normalized name are kept
+      // in the array — matchRowsToFiles handles conflicts.
+      async _buildFileIndex(dirHandle) {
+        const index = new Map();
+        const onEntry = (name, pathSegments) => {
+          // Skip directories; only files can be renamed.
+          // Walk callback already filters by kind — see _walkForXlsxIndex.
+          const key = XlsxNamer._normalizeForMatch(name);
+          if (!key) return;
+          if (!index.has(key)) index.set(key, []);
+          index.get(key).push({ fullName: name, pathSegments });
+        };
+        await this._walkForXlsxIndex(dirHandle, onEntry, []);
+        return index;
+      },
+
+      async _walkForXlsxIndex(dirHandle, onEntry, pathSegments) {
+        // Yield every 100 entries to keep the UI responsive on big trees.
+        let count = 0;
+        for await (const [name, child] of dirHandle.entries()) {
+          if (child.kind === 'file') {
+            onEntry(name, pathSegments);
+          } else if (child.kind === 'directory') {
+            await this._walkForXlsxIndex(child, onEntry, [...pathSegments, name]);
+          }
+          count++;
+          if (count % 100 === 0) await new Promise(r => setTimeout(r, 0));
+        }
+      },
+
+      async _executeXlsxRename() {
+        const s = this._xlsxState;
+        if (!s || !s.dirHandle) { this.toast('请先选择资产根目录'); return; }
+        const eligible = s.rows.filter(r =>
+          r._matchStatus === 'ok' && r._suggested && r._suggested.status !== 'err' && r._suggested.name
+        );
+        if (eligible.length === 0) { this.toast('无匹配行可改名'); return; }
+
+        // Permission gate (defensive — picker already asked, but handles can
+        // lose permission across long sessions).
+        try {
+          if (typeof s.dirHandle.queryPermission === 'function') {
+            let perm = await s.dirHandle.queryPermission({ mode: 'readwrite' });
+            if (perm !== 'granted') {
+              perm = await s.dirHandle.requestPermission({ mode: 'readwrite' });
+            }
+            if (perm !== 'granted') { this.toast('需要写权限'); return; }
+          }
+        } catch (e) { /* continue */ }
+
+        // Pre-check: no two rows try to write the same name (after strip
+        // extension). Without this, the second file.move() will fail with
+        // a "file exists" error mid-batch.
+        const targetNames = new Set();
+        const dupes = [];
+        for (const r of eligible) {
+          if (targetNames.has(r._suggested.name)) dupes.push(r._suggested.name);
+          targetNames.add(r._suggested.name);
+        }
+        if (dupes.length > 0) {
+          this.toast('建议名冲突：' + dupes.join(', ') + '（请先人工去重）', 6000);
+          return;
+        }
+
+        const results = { ok: 0, fail: 0, errors: [] };
+        for (const row of eligible) {
+          const target = row._suggested.name;
+          // Preserve the original extension — xlsx columns are extensionless,
+          // so the target name from the namer is also extensionless. We add
+          // the source file's extension back so the rename doesn't drop .mov.
+          const oldName = row._matchedFile.fullName;
+          const ext = oldName.includes('.') ? oldName.slice(oldName.lastIndexOf('.')) : '';
+          const finalTarget = target + ext;
+
+          if (finalTarget === oldName) {
+            // No-op: same name. Don't waste an FSA call (some throw on
+            // move-to-same-name).
+            results.ok++;
+            continue;
+          }
+
+          try {
+            // Re-resolve parent handle fresh on every iteration — FSA handles
+            // from entries() go stale within seconds. Same pattern as
+            // doRename() in the folder-drop flow.
+            const parent = await this._resolveXlsxParentHandle(row._matchedFile.pathSegments);
+            const liveFile = await parent.getFileHandle(oldName, { create: false });
+
+            if (typeof liveFile.move === 'function') {
+              try {
+                await liveFile.move(finalTarget);
+              } catch (moveErr) {
+                console.warn('move() failed, falling back to copy+remove:', moveErr.message);
+                await this._copyAndRemove(parent, liveFile, oldName, finalTarget);
+              }
+            } else {
+              await this._copyAndRemove(parent, liveFile, oldName, finalTarget);
+            }
+            results.ok++;
+          } catch (e) {
+            results.fail++;
+            results.errors.push(`${oldName} → ${finalTarget}: ${e.message}`);
+            console.error('xlsx rename failed:', e, { from: oldName, to: finalTarget });
+          }
+        }
+
+        // Summary toast.
+        if (results.fail === 0) {
+          this.toast(`✅ 改名完成：${results.ok} 个`, 4000);
+        } else {
+          this.toast(`⚠️ 改名 ${results.ok} 个,失败 ${results.fail} 个。控制台查看详情。`, 6000);
+          console.warn('xlsx rename errors:', results.errors);
+        }
+
+        // Rebuild file index — the names on disk just changed, the old index
+        // is stale. Re-scan and re-render so the UI reflects the new state.
+        try {
+          this._xlsxState.fileIndex = await this._buildFileIndex(s.dirHandle);
+        } catch (e) {
+          this.toast('重新扫描失败：' + e.message);
+        }
+        this._rebuildAndRenderXlsx();
+      },
+
+      async _resolveXlsxParentHandle(pathSegments) {
+        let cur = this._xlsxState.dirHandle;
+        for (const seg of pathSegments) {
+          cur = await cur.getDirectoryHandle(seg, { create: false });
+        }
+        return cur;
       }
     };
 
