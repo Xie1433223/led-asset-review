@@ -88,6 +88,7 @@
             <h2>📁 拖入文件夹开始审核</h2>
             <p>${hint}</p>
             <p style="margin-top:16px;"><button id="pick-btn">或点击选择文件夹</button></p>
+            <p style="margin-top:8px;"><button id="xlsx-btn" style="background:white;border:1px solid #dadce0;color:#5f6368;font-size:12px;padding:4px 10px;">📊 或上传统计表(xlsx)</button></p>
           </div>`;
 
         const drop = document.getElementById('drop');
@@ -99,6 +100,7 @@
           this.handleDrop(e.dataTransfer.items);
         });
         document.getElementById('pick-btn').addEventListener('click', () => this.handlePicker());
+        document.getElementById('xlsx-btn').addEventListener('click', () => this.handleXlsxButton());
       },
 
       async handleDrop(items) {
@@ -486,6 +488,237 @@
         await this.handlePicker();
         // handlePicker() on success calls scanAndReview() which calls
         // runValidation() which sets phase=reviewing and shows the button.
+      },
+
+      // ===== xlsx upload mode =====
+      // Lazy-loads SheetJS + pinyin-pro from CDN on first use. Both libs
+      // are large (~800KB combined) so we don't load them at boot time —
+      // the folder-drop flow works fine without them, and only the xlsx
+      // mode needs them.
+      _cdnUrls: {
+        xlsx:    'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+        pinyin:  'https://cdn.jsdelivr.net/npm/pinyin-pro@3/dist/index.js'
+      },
+      async _loadScript(src) {
+        if (document.querySelector(`script[src="${src}"]`)) {
+          // Already in DOM. Wait for it to finish if mid-load, or resolve.
+          await new Promise(r => {
+            const existing = document.querySelector(`script[src="${src}"]`);
+            if (existing.dataset.loaded === '1') return r();
+            existing.addEventListener('load', () => r(), { once: true });
+            existing.addEventListener('error', () => r(), { once: true });
+          });
+          return;
+        }
+        return new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = src;
+          s.onload = () => { s.dataset.loaded = '1'; resolve(); };
+          s.onerror = () => reject(new Error('CDN 加载失败: ' + src));
+          document.head.appendChild(s);
+        });
+      },
+
+      async handleXlsxButton() {
+        // Trigger a hidden file input — accept the iQiyi template
+        // (.xlsx is the standard; .xls for legacy 2003 templates).
+        let input = document.getElementById('xlsx-file-input');
+        if (!input) {
+          input = document.createElement('input');
+          input.type = 'file';
+          input.id = 'xlsx-file-input';
+          input.accept = '.xlsx,.xls';
+          input.style.display = 'none';
+          input.addEventListener('change', e => this._onXlsxFileSelected(e.target.files[0]));
+          document.body.appendChild(input);
+        }
+        input.value = null;  // allow re-selecting the same file
+        input.click();
+      },
+
+      async _onXlsxFileSelected(file) {
+        if (!file) return;
+        this.toast('加载中…', 1000);
+        // Lazy-load CDN deps (parallel — they're independent).
+        try {
+          await Promise.all([
+            this._loadScript(this._cdnUrls.xlsx),
+            this._loadScript(this._cdnUrls.pinyin)
+          ]);
+        } catch (e) {
+          this.toast('CDN 加载失败：' + e.message + '（需要联网，或把 xlsx.full.min.js / pinyin-pro 放到 dist/ 旁）', 6000);
+          return;
+        }
+        // Read file → ArrayBuffer → parse.
+        let buf;
+        try {
+          buf = await file.arrayBuffer();
+        } catch (e) {
+          this.toast('读取文件失败：' + e.message);
+          return;
+        }
+        let parsed;
+        try {
+          parsed = XlsxTableParser.parse(buf);
+        } catch (e) {
+          this.toast('解析 xlsx 失败：' + e.message);
+          return;
+        }
+        this._xlsxState = {
+          fileName: file.name,
+          rows: parsed.rows,
+          colMap: parsed.colMap,
+          method: 'RVC'  // default per iQiyi 统计表 typical use
+        };
+        this._rebuildAndRenderXlsx();
+      },
+
+      _rebuildAndRenderXlsx() {
+        const s = this._xlsxState;
+        if (!s) return;
+        // Pre-pass: compute shot numbers from 拍摄地理名称 grouping.
+        XlsxNamer.computeShotMap(s.rows);
+        // Build per-row suggested name.
+        for (const row of s.rows) {
+          const result = XlsxNamer.build(row, this.state.rules, {
+            method: s.method,
+            shotCode: row._shotCode
+          });
+          row._suggested = result;
+        }
+        this.renderXlsxPreview();
+      },
+
+      renderXlsxPreview() {
+        const s = this._xlsxState;
+        if (!s) return;
+        const okCount = s.rows.filter(r => r._suggested.status === 'ok').length;
+        const warnCount = s.rows.filter(r => r._suggested.status === 'warn').length;
+        const errCount = s.rows.filter(r => r._suggested.status === 'err').length;
+
+        const methodOptions = ['RS', 'RVC', 'VE', 'CP', 'DC', 'UE', 'CG']
+          .map(m => `<option value="${m}" ${s.method === m ? 'selected' : ''}>${m}</option>`).join('');
+
+        const rowsHtml = s.rows.map(row => {
+          const sug = row._suggested;
+          const statusBadge = sug.status === 'ok' ? '✅'
+            : sug.status === 'warn' ? '⚠️'
+            : '❌';
+          const statusTitle = sug.warnings.length > 0
+            ? `title="${sug.warnings.join(' / ')}"`
+            : '';
+          const nameColor = sug.status === 'err' ? '#fce8e6' : '#e6f4ea';
+          return `
+            <tr ${statusTitle}>
+              <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${row.serial}</td>
+              <td style="padding:8px;border-bottom:1px solid #eee;">${this._escapeHtml(row.sceneName)}</td>
+              <td style="padding:8px;border-bottom:1px solid #eee;">${this._escapeHtml(row.location)}</td>
+              <td style="padding:8px;border-bottom:1px solid #eee;">${this._escapeHtml(row.time)}</td>
+              <td style="padding:8px;border-bottom:1px solid #eee;">${this._escapeHtml(row.weather)}</td>
+              <td style="padding:8px;border-bottom:1px solid #eee;color:#5f6368;font-family:monospace;font-size:12px;">${this._escapeHtml(row.currentName)}</td>
+              <td style="padding:8px;border-bottom:1px solid #eee;background:${nameColor};font-family:monospace;font-weight:bold;">${sug.name ? this._escapeHtml(sug.name) : '<em style="color:#d93025;">无法生成</em>'}</td>
+              <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${statusBadge}</td>
+            </tr>`;
+        }).join('');
+
+        document.getElementById('main').innerHTML = `
+          <div style="background:white;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+              <div>
+                <h2 style="margin:0 0 4px;">📊 统计表预览</h2>
+                <p style="margin:0;color:#5f6368;font-size:13px;">${this._escapeHtml(s.fileName)} · 共 ${s.rows.length} 行
+                  <span style="color:#0d8043;margin-left:8px;">✅ ${okCount}</span>
+                  <span style="color:#b06000;margin-left:8px;">⚠️ ${warnCount}</span>
+                  <span style="color:#d93025;margin-left:8px;">❌ ${errCount}</span>
+                </p>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <label style="font-size:13px;color:#5f6368;">制作方式
+                  <select id="xlsx-method" style="margin-left:4px;padding:4px 8px;">${methodOptions}</select>
+                </label>
+                <button id="xlsx-rebuild" style="padding:6px 12px;background:white;border:1px solid #dadce0;border-radius:4px;cursor:pointer;">↻ 重新生成</button>
+                <button id="xlsx-download" style="padding:6px 16px;background:#1a73e8;color:white;border:none;border-radius:4px;cursor:pointer;">📥 下载 rename.sh</button>
+                <button id="xlsx-back" style="padding:6px 12px;background:white;border:1px solid #dadce0;border-radius:4px;cursor:pointer;">↩ 回到拖目录</button>
+              </div>
+            </div>
+            <div style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                  <tr style="background:#f8f9fa;">
+                    <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;">序号</th>
+                    <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;text-align:left;">场景</th>
+                    <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;text-align:left;">拍摄地</th>
+                    <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;text-align:left;">时间</th>
+                    <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;text-align:left;">天气</th>
+                    <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;text-align:left;">当前名</th>
+                    <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;text-align:left;">建议名</th>
+                    <th style="padding:10px 8px;border-bottom:2px solid #e0e0e0;">状态</th>
+                  </tr>
+                </thead>
+                <tbody>${rowsHtml}</tbody>
+              </table>
+            </div>
+            ${errCount > 0 ? `
+              <div style="margin-top:16px;padding:12px;background:#fce8e6;border-radius:4px;color:#d93025;font-size:13px;">
+                <strong>❌ ${errCount} 行无法生成</strong> — 改名脚本里不会包含这些行,请手动核对。常见原因:场景名为空、未知气氛时间、未知天气。
+              </div>` : ''}
+          </div>`;
+
+        document.getElementById('xlsx-method').addEventListener('change', e => {
+          s.method = e.target.value;
+          this._rebuildAndRenderXlsx();
+        });
+        document.getElementById('xlsx-rebuild').addEventListener('click', () => this._rebuildAndRenderXlsx());
+        document.getElementById('xlsx-download').addEventListener('click', () => this.generateXlsxShell());
+        document.getElementById('xlsx-back').addEventListener('click', () => this.backToDropZone());
+      },
+
+      generateXlsxShell() {
+        const s = this._xlsxState;
+        if (!s) return;
+        const ok = s.rows.filter(r => r._suggested.status !== 'err' && r._suggested.name);
+        const warnCount = ok.filter(r => r._suggested.status === 'warn').length;
+        if (ok.length === 0) { this.toast('无可改名行'); return; }
+        const lines = [
+          '#!/usr/bin/env bash',
+          '# Generated by LED Asset Review · xlsx mode',
+          '# ⚠️ 请 cd 到资产根目录后运行本脚本',
+          `# 共 ${ok.length} 条改名 · ${warnCount} 条警告`,
+          'set -e',
+          ''
+        ];
+        for (const row of ok) {
+          const oldQ = `'${row.currentName.replace(/'/g, "'\\''")}'`;
+          const newQ = `'${row._suggested.name.replace(/'/g, "'\\''")}'`;
+          lines.push(`mv -- ${oldQ} ${newQ}`);
+        }
+        const content = lines.join('\n') + '\n';
+        const blob = new Blob([content], { type: 'text/x-shellscript' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'rename-xlsx.sh';
+        a.click();
+        URL.revokeObjectURL(url);
+        this.toast(`已下载 rename-xlsx.sh（${ok.length} 个改名）`);
+      },
+
+      backToDropZone() {
+        this._xlsxState = null;
+        this._dirHandle = null;
+        this.state.phase = 'boot';
+        this.showDropZone();
+        document.getElementById('repick-btn').style.display = 'none';
+      },
+
+      _escapeHtml(s) {
+        if (s == null) return '';
+        return String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
       }
     };
 

@@ -73,6 +73,7 @@
 | 中文 | 代码 |
 |---|---|
 | 正常天气 | \`N\` — Normal |
+| 阴天 | \`CS\` — Cloudy_Sky |
 | 下雨 | \`R\` — Rain |
 
 ### 字段 5a：制作方式描述（用于最终视频成品）
@@ -305,6 +306,145 @@
       'LXZC_1_NT_N_RS_V01.mov',
       'T21: UI 流程（validate + suggestName）能拿到建议名'
     );
+
+    // —— XlsxTableParser (with stubbed XLSX) ——
+    // Stub XLSX + pinyin so the new module's logic can be tested without
+    // a real network round-trip. Real integration test (against the actual
+    // fixture.xlsx) is added at the bottom of this block, gated on the
+    // real libs being loaded by the page.
+    const iqiyiHeaders = [
+      '序号', '文件命名', '场景名称', '拍摄地理名称（素材拍摄位置）',
+      '拍摄地理位置（视效合成视频需要拍摄素材位置）\n经纬度', '场景简介', '内景/外景',
+      '气氛时间', '天气', '主要出现集数及场次\n（如不清楚可不填）',
+      '播放素材截图', '\n视频格式\n建议ProRes422HQ',
+      '原始拍摄素材文件名称', '视频时长', '备注'
+    ];
+    const iqiyiGrid = [
+      ['LED大屏播放素材统计表'],
+      ['填写日期：', '2026-06-15'],
+      iqiyiHeaders,
+      [1, '1-1Apple ProRes 422 HQ 4500x1400 05m00s_000001', '青梧镇街道', '乐山市王坎',
+       '29.63,103.77', '街道周围环境', '外景', '上午', '晴天', null, null, '是', '否', null, null],
+      [2, '1-2Apple ProRes 422 HQ 4500x1400 05m00s_000002', '青梧镇街道', '乐山市王坎',
+       '29.63,103.77', '街道周围环境', '外景', '中午', '晴天', null, null, '是', '否', null, null],
+      [3, '1-3Apple ProRes 422 HQ 4500x1400 05m00s_000003', '青梧镇街道', '乐山市王坎',
+       '29.63,103.77', '街道周围环境', '外景', '下午', '阴天', null, null, '是', '否', null, null],
+      [4, '1-4M_Raw_Cam_4500x1400_000001', '青梧镇街道', '乐山市王坎',
+       '29.63,103.77', '街道周围环境', '外景', '上午', '晴天', null, null, '否', '是', null, null],
+      [],  // empty row (sentinel for end of data)
+      ['填表人：', '张三']  // footer — should be ignored
+    ];
+    window.XLSX = {
+      read: () => ({ Sheets: { 'LED大屏播放素材': {} }, SheetNames: ['LED大屏播放素材'] }),
+      utils: {
+        sheet_to_json: () => iqiyiGrid
+      }
+    };
+    // Stub pinyin: real impls return arrays; map known Chinese names
+    // explicitly so the test doesn't depend on pinyin-pro being loaded.
+    window.pinyin = (str, opts) => {
+      if (str === '青梧镇街道') return ['q','w','z','j','d'];
+      if (str === '理想之城') return ['l','x','z','c'];
+      if (str === '青梧镇') return ['q','w','z'];
+      return str.split('').map(c => c);  // pass-through (1:1) for unknown
+    };
+
+    const parsed = XlsxTableParser.parse(new ArrayBuffer(0));
+    assertEq(parsed.rows.length, 4, 'XlsxTableParser parses 4 data rows (skips empty + footer)');
+    assertEq(parsed.rows[0].serial, 1, 'XlsxTableParser row 0 序号 = 1');
+    assertEq(parsed.rows[0].sceneName, '青梧镇街道', 'XlsxTableParser row 0 场景名');
+    assertEq(parsed.rows[0].location, '乐山市王坎', 'XlsxTableParser row 0 拍摄地');
+    assertEq(parsed.rows[0].time, '上午', 'XlsxTableParser row 0 时间');
+    assertEq(parsed.rows[0].weather, '晴天', 'XlsxTableParser row 0 天气');
+    assertEq(parsed.rows[0].isCameraOriginal, false, 'XlsxTableParser row 0 摄影机原始素材=否');
+    assertEq(parsed.rows[3].isCameraOriginal, true, 'XlsxTableParser row 3 摄影机原始素材=是');
+
+    // Header row missing → throw
+    assertThrows(() => {
+      window.XLSX.utils.sheet_to_json = () => [['no 序号 here'], ['something']];
+      XlsxTableParser.parse(new ArrayBuffer(0));
+    }, 'XlsxTableParser throws when 序号 column missing');
+
+    // —— XlsxNamer (with stubbed pinyin) ——
+    const xRules = rules;  // reuse the SAMPLE_SKILL rules parsed above
+    const sampleRow = {
+      serial: 1, currentName: '1-1Apple...', sceneName: '青梧镇街道', location: '乐山市王坎',
+      time: '上午', weather: '晴天', format: '是', isCameraOriginal: false
+    };
+
+    // Standard final video
+    let xr = XlsxNamer.build(sampleRow, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.name, 'QWZJD_1_FN_N_RS_V01', 'XlsxNamer: 青梧镇/上午/晴天/否/RS → QWZJD_1_FN_N_RS_V01');
+    assertEq(xr.status, 'ok', 'XlsxNamer: 晴天+标准 = ok');
+
+    // 中午 → Nn (case sensitivity, lowercase n!)
+    xr = XlsxNamer.build({ ...sampleRow, time: '中午' }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.name, 'QWZJD_1_Nn_N_RS_V01', 'XlsxNamer: 中午 → Nn (lowercase n)');
+
+    // 阴天 → CS
+    xr = XlsxNamer.build({ ...sampleRow, weather: '阴天' }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.name, 'QWZJD_1_FN_CS_RS_V01', 'XlsxNamer: 阴天 → CS');
+
+    // 傍晚 (不在 SKILL.md 字典) → NF
+    xr = XlsxNamer.build({ ...sampleRow, time: '傍晚' }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.name, 'QWZJD_1_NF_N_RS_V01', 'XlsxNamer: 傍晚 (not in spec) → NF fallback');
+
+    // 摄影机原始素材=是 → _M 模式 (无版本号)
+    xr = XlsxNamer.build({ ...sampleRow, isCameraOriginal: true }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.name, 'QWZJD_1_FN_N_M', 'XlsxNamer: 摄影机原始素材 → _M suffix, no version');
+
+    // 视频格式=否 → warning
+    xr = XlsxNamer.build({ ...sampleRow, format: '否' }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.status, 'warn', 'XlsxNamer: 视频格式=否 → status warn');
+    assertEq(xr.warnings.includes('视频格式未达到 ProRes422HQ 建议'), true, 'XlsxNamer: format=否 warning text');
+
+    // 空场景名 → err
+    xr = XlsxNamer.build({ ...sampleRow, sceneName: '' }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.status, 'err', 'XlsxNamer: 空场景名 → err');
+    assertEq(xr.name, null, 'XlsxNamer: err 时 name=null');
+
+    // 未知时间 → err
+    xr = XlsxNamer.build({ ...sampleRow, time: '凌晨' }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.status, 'err', 'XlsxNamer: 未知时间 → err');
+
+    // 未知天气 → err
+    xr = XlsxNamer.build({ ...sampleRow, weather: '沙尘暴' }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.status, 'err', 'XlsxNamer: 未知天气 → err');
+
+    // 不同 method 切换
+    xr = XlsxNamer.build(sampleRow, xRules, { method: 'VE', shotCode: '1' });
+    assertEq(xr.name, 'QWZJD_1_FN_N_VE_V01', 'XlsxNamer: method=VE 切换');
+
+    // 理想之城 / 夜晚 / 阴天 / 摄影机原始 → LXZC_1_NT_CS_M
+    xr = XlsxNamer.build({
+      serial: 99, currentName: '99-Mraw.mov', sceneName: '理想之城', location: '上海市外滩',
+      time: '夜晚', weather: '阴天', format: '是', isCameraOriginal: true
+    }, xRules, { method: 'RS', shotCode: '1' });
+    assertEq(xr.name, 'LXZC_1_NT_CS_M', 'XlsxNamer: 理想之城/夜晚/阴天/原始素材 → LXZC_1_NT_CS_M');
+
+    // —— XlsxNamer.computeShotMap ——
+    const shotRows = [
+      { location: '乐山市王坎', currentName: '1-1Apple...' },
+      { location: '乐山市王坎', currentName: '1-2Apple...' },
+      { location: '乐山市石桥', currentName: '2-1Apple...' },
+      { location: '乐山市邵村', currentName: '3-1Apple...' }
+    ];
+    const shotMap = XlsxNamer.computeShotMap(shotRows);
+    assertEq(shotMap['乐山市王坎'], '1', 'computeShotMap: 王坎 → 1');
+    assertEq(shotMap['乐山市石桥'], '2', 'computeShotMap: 石桥 → 2');
+    assertEq(shotMap['乐山市邵村'], '3', 'computeShotMap: 邵村 → 3');
+    assertEq(shotRows[0]._shotCode, '1', 'computeShotMap: row 0 镜头 = 1');
+    assertEq(shotRows[2]._shotCode, '2', 'computeShotMap: row 2 镜头 = 2');
+
+    // 空 location → fallback to currentName prefix
+    const fallbackRows = [
+      { location: '', currentName: '5-3Apple...' },
+      { location: '', currentName: 'Apple ProRes...' }
+    ];
+    XlsxNamer.computeShotMap(fallbackRows);
+    assertEq(fallbackRows[0]._shotCode, '5', 'computeShotMap: 空 location, parse N-x prefix');
+    assertEq(fallbackRows[1]._shotCode, '1', 'computeShotMap: 空 location + 无 prefix → 1');
+    assertEq(fallbackRows[1]._shotFallback, true, 'computeShotMap: 落到默认 1 时标 _shotFallback');
 
     // —— ScanEngine.walkFileTree (integration with FileSystemFileHandle) ——
     // This test requires a user gesture to open the directory picker, so it

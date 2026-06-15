@@ -304,6 +304,229 @@ const CapabilityDetector = {
   }
 };
 
+// XlsxTableParser — parses the iQiyi《LED 大屏播放素材统计表》template into
+// a flat array of normalized row records. The template's first 3 rows are
+// metadata (title / date / headers), data starts at row 4. Column layout is
+// matched by SUBSTRING on header text, not by index — so column reordering
+// in future template versions is forgiving.
+const XlsxTableParser = {
+  // Maps canonical field names to header substrings. Substring match is
+  // case-sensitive and works on the raw cell text (with newlines / parens
+  // left intact, since the iQiyi template has stuff like
+  // '\n视频格式\n建议ProRes422HQ').
+  HEADER_KEYS: {
+    serial:        '序号',
+    currentName:   '文件命名',
+    sceneName:     '场景名称',
+    location:      '拍摄地理名称',
+    time:          '气氛时间',
+    weather:       '天气',
+    format:        '视频格式',
+    isCameraOrig:  '原始拍摄素材'
+  },
+
+  parse(arrayBuffer) {
+    if (typeof XLSX === 'undefined') {
+      throw new Error('SheetJS (XLSX) 未加载 — 请检查 CDN 是否可达');
+    }
+    const wb = XLSX.read(arrayBuffer, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error('xlsx 里没有 sheet');
+
+    // sheet_to_json with header:1 gives us a 2D array; defval:null keeps
+    // empty cells as null instead of dropping them (which would shift
+    // column indices).
+    const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
+
+    // Find the header row: first row containing '序号' in column 0.
+    let headerRowIdx = -1;
+    for (let i = 0; i < grid.length; i++) {
+      const c0 = grid[i]?.[0];
+      if (c0 != null && String(c0).trim() === this.HEADER_KEYS.serial) {
+        headerRowIdx = i;
+        break;
+      }
+    }
+    if (headerRowIdx < 0) {
+      throw new Error('找不到表头行(第一列应为 "序号")');
+    }
+
+    // Build a column-index map from the header row. Substring match:
+    // '拍摄地理名称（素材拍摄位置）' contains '拍摄地理名称' → match.
+    const headerRow = grid[headerRowIdx];
+    const colMap = {};
+    for (const [key, needle] of Object.entries(this.HEADER_KEYS)) {
+      let found = -1;
+      for (let c = 0; c < headerRow.length; c++) {
+        const cell = headerRow[c];
+        if (cell == null) continue;
+        if (String(cell).includes(needle)) { found = c; break; }
+      }
+      if (found < 0) throw new Error(`表头缺少列 "${needle}"`);
+      colMap[key] = found;
+    }
+
+    // Data rows: from headerRow+1, stop at first row where 序号 is null
+    // (sheet_to_json pads trailing rows with nulls sometimes; the iQiyi
+    // template also leaves tail rows blank).
+    const rows = [];
+    for (let r = headerRowIdx + 1; r < grid.length; r++) {
+      const row = grid[r];
+      if (!row) continue;
+      const serial = row[colMap.serial];
+      if (serial == null || serial === '') break;  // sentinel: end of data
+      // Defensive: skip rows where 序号 isn't a number (avoids random
+      // footer / notes rows in some templates).
+      if (typeof serial !== 'number' && isNaN(parseInt(serial, 10))) continue;
+
+      rows.push({
+        serial: parseInt(serial, 10),
+        currentName: row[colMap.currentName] != null ? String(row[colMap.currentName]) : '',
+        sceneName:   row[colMap.sceneName]   != null ? String(row[colMap.sceneName]).trim()   : '',
+        location:    row[colMap.location]    != null ? String(row[colMap.location]).trim()    : '',
+        time:        row[colMap.time]        != null ? String(row[colMap.time]).trim()        : '',
+        weather:     row[colMap.weather]     != null ? String(row[colMap.weather]).trim()     : '',
+        format:      row[colMap.format]      != null ? String(row[colMap.format]).trim()      : '',
+        isCameraOriginal: this._truthy(row[colMap.isCameraOrig])
+      });
+    }
+
+    return { rows, colMap };
+  },
+
+  _truthy(v) {
+    if (v == null) return false;
+    const s = String(v).trim();
+    return s === '是' || s.toLowerCase() === 'yes' || s === 'true' || s === '1';
+  }
+};
+
+// XlsxNamer — builds the suggested file name from a parsed xlsx row + the
+// existing rules (timeCodes / weatherCodes / methods). Field 1 (scene code)
+// is derived from the Chinese 场景名称 via pinyin-pro. Field 2 (shot
+// number) is derived from 拍摄地理名称: in order of first appearance, the
+// 1st unique value → 镜1, 2nd → 镜2, etc. Method + version are GLOBAL
+// options (one per upload) since the template has no per-row column.
+const XlsxNamer = {
+  // Returns: { name, status, warnings[] }
+  //   status: 'ok' | 'warn' | 'err'
+  //   name is the suggested file name WITHOUT extension (per project
+  //   convention from the user — extension stripped from the output)
+  build(row, rules, options) {
+    const { method = 'RVC', version = 'V01' } = options || {};
+    const warnings = [];
+
+    // Field 1: scene code via pinyin-pro.
+    if (!row.sceneName) {
+      return { name: null, status: 'err', warnings: ['场景名称为空'] };
+    }
+    if (typeof pinyin === 'undefined') {
+      return { name: null, status: 'err', warnings: ['pinyin-pro 未加载 — 请检查 CDN'] };
+    }
+    let sceneCode;
+    try {
+      // pinyin('青梧镇街道', { pattern: 'first', toneType: 'none', type: 'array' })
+      //   → ['q','w','z','j','d']
+      const initials = pinyin(row.sceneName, { pattern: 'first', toneType: 'none', type: 'array' });
+      sceneCode = initials.join('').toUpperCase();
+    } catch (e) {
+      return { name: null, status: 'err', warnings: ['拼音转换失败: ' + e.message] };
+    }
+    if (!/^[A-Z]{2,15}$/.test(sceneCode)) {
+      return { name: null, status: 'err', warnings: [`场景码 "${sceneCode}" 不合法`] };
+    }
+
+    // Field 3: time code — Chinese → code via rules.timeCodes (reverse map).
+    // Rules parser stores {CODE: '中文'}, so build the reverse.
+    const timeReverseMap = this._reverseMap(rules.timeCodes);
+    let timeCode = timeReverseMap[row.time];
+    if (!timeCode) {
+      // 傍晚 isn't in SKILL.md — map to 黄昏 (NF) as the closest match.
+      if (row.time === '傍晚') timeCode = 'NF';
+      else if (row.time === '早上') timeCode = 'MO';
+      else if (row.time === '夜里') timeCode = 'NT';
+    }
+    if (!timeCode) {
+      return { name: null, status: 'err', warnings: [`未知气氛时间 "${row.time}"`] };
+    }
+
+    // Field 4: weather code.
+    const weatherReverseMap = this._reverseMap(rules.weatherCodes);
+    let weatherCode = weatherReverseMap[row.weather];
+    if (!weatherCode) {
+      // 晴天 (sunny) is the most common default; spec only lists 阴天 for
+      // cloudy. 晴天 → N is the "no special weather" default in the spec.
+      if (row.weather === '晴天') weatherCode = 'N';
+    }
+    if (!weatherCode) {
+      return { name: null, status: 'err', warnings: [`未知天气 "${row.weather}"`] };
+    }
+
+    // Field 5: method (global, user-set).
+    const methodDict = { ...rules.methods.video, ...rules.methods.project };
+    if (!methodDict[method]) {
+      return { name: null, status: 'err', warnings: [`未知制作方式 "${method}"`] };
+    }
+
+    // Build the name. Two patterns per SKILL.md:
+    //   摄影机原始素材: <scene>_<shot>_<time>_<weather>_M       (no version)
+    //   最终视频成品:   <scene>_<shot>_<time>_<weather>_<method>_<version>
+    const name = row.isCameraOriginal
+      ? `${sceneCode}_${options.shotCode}_${timeCode}_${weatherCode}_M`
+      : `${sceneCode}_${options.shotCode}_${timeCode}_${weatherCode}_${method}_${version}`;
+
+    // Soft warnings (status stays 'ok' / 'warn'):
+    if (row.format === '否') {
+      warnings.push('视频格式未达到 ProRes422HQ 建议');
+    }
+    if (row.isCameraOriginal && method !== 'RS') {
+      warnings.push('摄影机原始素材不应标"全实拍"以外的方式');
+    }
+    if (!row.location) {
+      warnings.push('拍摄地理名称为空 — 镜头序号可能不准确');
+    }
+    return { name, status: warnings.length > 0 ? 'warn' : 'ok', warnings };
+  },
+
+  _reverseMap(obj) {
+    const out = {};
+    for (const [code, cn] of Object.entries(obj)) {
+      out[cn] = code;
+    }
+    return out;
+  },
+
+  // Compute shot numbers for a batch of rows. Pre-pass: walk rows in order,
+  // assign a 1-based integer to each unique 拍摄地理名称. Rows with empty
+  // location fall back to parsing the "N-x" prefix from currentName
+  // (e.g. "1-1Apple ProRes..." → shot 1), then to "1" as last resort.
+  computeShotMap(rows) {
+    const shotByLocation = {};
+    let nextShot = 1;
+    for (const row of rows) {
+      const key = row.location || '';
+      if (key) {
+        if (!(key in shotByLocation)) {
+          shotByLocation[key] = String(nextShot++);
+        }
+        row._shotCode = shotByLocation[key];
+      } else {
+        // Fallback 1: parse "N-x" from currentName
+        const m = (row.currentName || '').match(/^(\d+)-/);
+        if (m) {
+          row._shotCode = m[1];
+        } else {
+          row._shotCode = '1';
+          row._shotFallback = true;
+        }
+      }
+    }
+    return shotByLocation;
+  }
+};
+
 window.RuleParser = RuleParser;
 window.ScanEngine = ScanEngine;
 window.CapabilityDetector = CapabilityDetector;
+window.XlsxTableParser = XlsxTableParser;
+window.XlsxNamer = XlsxNamer;
